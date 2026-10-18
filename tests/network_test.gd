@@ -1,0 +1,69 @@
+extends SceneTree
+
+const BridgeScript = preload("res://scripts/net/net_bridge.gd")
+
+var failures: Array[String] = []
+var action_count: int = 0
+var rejected_reasons: Array[String] = []
+var reset_count: int = 0
+
+func _initialize() -> void:
+	var bridge = BridgeScript.new()
+	bridge.set_episode_id("ep-current")
+	bridge.update_state({"episode_id": "ep-current", "physics_tick": 100})
+	bridge.action_received.connect(func(_action, _duration, _seq, _tick, _episode, _source): action_count += 1)
+	bridge.command_rejected.connect(func(_seq, reason, _episode, _tick): rejected_reasons.append(reason))
+	bridge.reset_received.connect(func(_seed, _config, _episode): reset_count += 1)
+	bridge._handle_message(JSON.stringify({
+		"type": "action", "protocol_version": 1, "episode_id": "ep-current",
+		"seq": 1, "tick": 82, "action": "LEFT", "duration": 0.4,
+		"label_source": "rule_based"
+	}))
+	_check(action_count == 1, "recent delayed command should be accepted")
+	bridge._handle_message(JSON.stringify({
+		"type": "action", "protocol_version": 1, "episode_id": "ep-current",
+		"seq": 2, "tick": 100, "action": "RIGHT"
+	}))
+	_check(action_count == 2, "current command after a delayed command should be accepted")
+	bridge._handle_message(JSON.stringify({
+		"type": "action", "protocol_version": 1, "episode_id": "ep-current",
+		"seq": 1, "tick": 100, "action": "RIGHT"
+	}))
+	_check(rejected_reasons.has("duplicate_or_stale_seq"), "duplicate sequence should be rejected")
+	bridge._handle_message(JSON.stringify({
+		"type": "action", "protocol_version": 1, "episode_id": "ep-old",
+		"seq": 3, "tick": 100, "action": "RIGHT"
+	}))
+	_check(rejected_reasons.has("wrong_episode"), "previous episode command should be rejected")
+	bridge._handle_message(JSON.stringify({
+		"type": "action", "protocol_version": 1, "episode_id": "ep-current",
+		"seq": 3, "tick": 60, "action": "RIGHT"
+	}))
+	_check(rejected_reasons.has("stale_tick"), "stale tick command should be rejected")
+	bridge._handle_message(JSON.stringify({
+		"type": "action", "protocol_version": 1, "episode_id": "ep-current",
+		"seq": 3, "tick": 100, "action": "FLY"
+	}))
+	_check(rejected_reasons.has("invalid_action"), "unsupported action should be rejected")
+	bridge._handle_message(JSON.stringify({
+		"type": "reset", "protocol_version": 1, "seed": 42,
+		"config": {"traffic_density": 0.75}, "episode_id": "ep-next"
+	}))
+	_check(reset_count == 1, "valid seeded reset should be accepted")
+	bridge._handle_message(JSON.stringify({
+		"type": "reset", "protocol_version": 1, "seed": 42,
+		"config": {"unknown_setting": 10}
+	}))
+	_check(rejected_reasons.has("invalid_reset"), "unknown reset settings should be rejected")
+	bridge.free()
+	if failures.is_empty():
+		print("NETWORK_TESTS_PASS")
+		quit(0)
+	else:
+		for failure in failures:
+			push_error(failure)
+		quit(1)
+
+func _check(condition: bool, message: String) -> void:
+	if not condition:
+		failures.append(message)
