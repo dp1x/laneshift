@@ -105,13 +105,14 @@ class ControllerServer:
         model_configs=None,
         http_client=None,
         decision_timeout=0.4,
+        max_state_age_s=0.4,
     ):
         self.policy_name = policy_name
         self.policy = load_policy(policy_name, model_configs, http_client)
         self.duration = duration
         self.expected_episodes = expected_episodes
         self.decision_timeout = decision_timeout
-        self.max_state_age_s = 0.4
+        self.max_state_age_s = max_state_age_s
         self.shutdown_event = asyncio.Event()
         self.sequence = 0
         self.decisions = 0
@@ -131,6 +132,8 @@ class ControllerServer:
         self.last_episode_id = ""
         self.superseded_states = 0
         self.stale_decisions = 0
+        self.states_received = 0
+        self.max_event_loop_lag_ms = 0.0
 
     async def start(self):
         start = getattr(self.policy, "start", None)
@@ -161,6 +164,7 @@ class ControllerServer:
                             "seq": -1, "reason": "invalid_state"
                         }))
                         continue
+                    self.states_received += 1
                     latest_state["state"] = message
                     if state_queue.full():
                         try:
@@ -197,6 +201,15 @@ class ControllerServer:
                 return
             finally:
                 state_queue.task_done()
+
+    async def _lag_monitor(self):
+        """Report the longest gap between 100 ms ticks: a blocked event loop shows up here."""
+        previous = time.perf_counter()
+        while True:
+            await asyncio.sleep(0.1)
+            now = time.perf_counter()
+            self.max_event_loop_lag_ms = max(self.max_event_loop_lag_ms, (now - previous) * 1000.0)
+            previous = now
 
     async def _choose(self, state):
         chooser = self.policy.choose_action
@@ -354,6 +367,8 @@ class ControllerServer:
             "protocol_rejections": self.protocol_rejections,
             "controller_failures": self.controller_failures,
             "completed_episodes": self.completed_episodes,
+            "states_received": self.states_received,
+            "max_event_loop_lag_ms": round(self.max_event_loop_lag_ms, 1),
             "superseded_states": self.superseded_states,
             "stale_decisions": self.stale_decisions,
             "decision_latency_ms_mean": statistics.fmean(self.latencies_ms) if self.latencies_ms else 0.0,
@@ -398,8 +413,10 @@ async def run_server(args):
             model_configs=model_configs,
             http_client=http_client,
             decision_timeout=args.decision_timeout,
+            max_state_age_s=args.max_state_age,
         )
         await server.start()
+        lag_task = asyncio.create_task(server._lag_monitor())
         async with websockets.serve(
             server.handle_connection,
             "127.0.0.1",
@@ -412,6 +429,7 @@ async def run_server(args):
             print(f"LaneShift controller listening at ws://127.0.0.1:{args.port} ({args.policy})", flush=True)
             if args.expected_episodes:
                 await server.shutdown_event.wait()
+        lag_task.cancel()
     result = server.metrics()
     print("LANESHIFT_METRICS " + json.dumps(result, separators=(",", ":")), flush=True)
     if args.metrics_out:
@@ -426,6 +444,8 @@ def parse_args(argv=None):
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--duration", type=float, default=0.35)
     parser.add_argument("--decision-timeout", type=float, default=0.45)
+    parser.add_argument("--max-state-age", type=float, default=0.4,
+                        help="how stale a decision's state may be, in seconds of simulation time, before it is discarded")
     parser.add_argument("--expected-episodes", type=int, default=0)
     parser.add_argument("--metrics-out")
     parser.add_argument("--kev-config", help="JSON model registry keyed by policy name")

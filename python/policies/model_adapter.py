@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from kev_state import ACTION_CRITERIA, compact_kev_state
 from policy import PolicyDecision
 
 ACTION_CRITERIA = {
@@ -18,24 +19,6 @@ ACTION_CRITERIA = {
     "BRAKE": "Reduce speed using the brake.",
 }
 LABEL_SOURCES = {"original_model", "fine_tuned_model"}
-STATE_FIELDS = (
-    "protocol_version",
-    "episode_id",
-    "scenario_seed",
-    "sim_time",
-    "physics_tick",
-    "state_id",
-    "player",
-    "traffic",
-    "legal_actions",
-    "score",
-    "distance",
-    "survival_time",
-    "collision",
-    "collision_count",
-    "episode_status",
-    "control_source",
-)
 
 
 class KevInferenceError(RuntimeError):
@@ -105,19 +88,10 @@ class KevSystemOnePolicy:
 
     @staticmethod
     def build_request(state: dict[str, Any], model_alias: str) -> dict[str, Any]:
-        legal_actions = state.get("legal_actions")
-        if (
-            not isinstance(legal_actions, list)
-            or not legal_actions
-            or "STAY" not in legal_actions
-            or any(action not in ACTION_CRITERIA for action in legal_actions)
-            or len(set(legal_actions)) != len(legal_actions)
-        ):
-            raise KevResponseError("decision state has no valid authoritative legal_actions set")
-        if not isinstance(state.get("player"), dict) or not isinstance(state.get("traffic"), list):
-            raise KevResponseError("decision state is missing structured player or traffic data")
+        compact = compact_kev_state(state)
+        legal_actions = compact["legal_actions"]
         return {
-            "state": {key: state[key] for key in STATE_FIELDS if key in state},
+            "state": compact,
             "model": model_alias,
             "questions": {
                 "next_action": {

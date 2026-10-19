@@ -13,4 +13,6 @@ if errorlevel 1 exit /b 1
 godot --headless --path "%~dp0." --script res://tests/network_test.gd
 if errorlevel 1 exit /b 1
 godot --headless --path "%~dp0." --script res://tests/telemetry_test.gd
+if errorlevel 1 exit /b 1
+godot --headless --path "%~dp0." --script res://tests/options_test.gd
 exit /b %errorlevel%

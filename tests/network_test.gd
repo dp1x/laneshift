@@ -62,6 +62,25 @@ func _initialize() -> void:
 		"config": {"unknown_setting": 10}
 	}))
 	_check(rejected_reasons.has("invalid_reset"), "unknown reset settings should be rejected")
+	# A slow model may legitimately answer many ticks after the state it saw.
+	var slow_bridge = BridgeScript.new()
+	slow_bridge.set_episode_id("ep-current")
+	slow_bridge.update_state({"episode_id": "ep-current", "physics_tick": 400})
+	var slow_accepted := [0]
+	slow_bridge.action_received.connect(func(_action, _duration, _seq, _tick, _episode, _source, _metadata): slow_accepted[0] += 1)
+	slow_bridge.max_stale_ticks = 2000
+	slow_bridge._handle_message(JSON.stringify({
+		"type": "action", "protocol_version": 1, "episode_id": "ep-current",
+		"seq": 1, "tick": 40, "action": "BRAKE", "duration": 0.3
+	}))
+	_check(slow_accepted[0] == 1, "a slow model's command should be accepted within a widened staleness bound")
+	slow_bridge.max_stale_ticks = 30
+	slow_bridge._handle_message(JSON.stringify({
+		"type": "action", "protocol_version": 1, "episode_id": "ep-current",
+		"seq": 2, "tick": 40, "action": "BRAKE", "duration": 0.3
+	}))
+	_check(slow_accepted[0] == 1, "a command beyond the staleness bound should still be rejected")
+	slow_bridge.free()
 	bridge.free()
 	if failures.is_empty():
 		print("NETWORK_TESTS_PASS")

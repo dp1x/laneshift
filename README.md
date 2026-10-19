@@ -16,12 +16,11 @@ What works today:
 - A Python controller communicating with the game over a localhost WebSocket.
 - Dummy and rule-based policies, both usable as baselines.
 - Dataset conversion and experiment tooling, including a Kev-format training export.
-- A Kev System One adapter, tested against a mock service.
+- A Kev System One adapter that has driven a real game episode with the released `jaredpalmer/kev-0.8b@v1.0` checkpoint running locally on CPU.
 
 What has **not** been established:
 
-- The real Kev-0.8B checkpoint has not been verified in this environment. The adapter is proven only against a mock service that reproduces the documented HTTP contract.
-- No fine-tuning has been performed.
+- Fine-tuning has not been performed.
 - No claim has been made that any model improves gameplay over the rule-based baseline.
 
 The game itself is a rough prototype. Its graphics are functional low-poly shapes, the driving model is kinematic rather than physical, and both are still being iterated on. Do not treat it as polished or production-ready.
@@ -61,6 +60,52 @@ python python/server.py --policy rule_based
 ```
 
 The controller binds to `127.0.0.1:8765` only. Godot connects to it, streams state snapshots, and applies the actions that come back. If the controller is not running, the game stays fully playable with the keyboard. If the controller disconnects or stops sending actions, the game reverts to keyboard control after 1.5 seconds.
+
+## Running a Kev model
+
+The controller speaks to a Kev System One server over HTTP; Godot never sees Kev. The server is a separate process, so the two ports stay independent: WebSocket `8765` for game control, HTTP `8009` for inference.
+
+Start Kev itself, following the upstream project:
+
+```powershell
+git clone https://github.com/jaredpalmer/kev.git
+cd kev
+uv sync --extra serve --python 3.13
+uv run --extra serve python -m kev.serve --run jaredpalmer/kev-0.8b@v1.0 --port 8009 --device cpu
+```
+
+On Windows, Hugging Face needs `HF_HUB_DISABLE_SYMLINKS=1` because creating symlinks in the cache needs privileges that a normal user does not have.
+
+Then register the checkpoint and start the controller:
+
+```powershell
+python python/server.py --policy kev_original --kev-config kev_models.example.json --port 8765
+```
+
+`expected_run` must match the `run` value that `GET /v1/models` reports for the checkpoint that is actually loaded. The controller refuses to label a run as a model if it does not, so a swapped or missing checkpoint fails at startup instead of producing fake model data. `kev_models.example.json` is a template; copy it and adjust the values for your own setup. Never commit API keys; the controller reads `KEV_API_KEY` from the environment.
+
+### Verified on this machine
+
+Kev-0.8B was served locally on CPU on a Snapdragon X Elite (Windows on ARM64) and drove a real game episode:
+
+- Served identity: `run: jaredpalmer/kev-0.8b@v1.0`, `base: Qwen/Qwen3.5-0.8B-Base`, backend `torch`, dtype `bfloat16`, device `cpu`, temperature `2.35`.
+- Inference latency: about 12.6 s to 24.6 s per decision, 16.2 s median. A standalone probe measured 5.3 s for a smaller state.
+- Process footprint: about 2.2 GB resident.
+- The game received four real decisions, each with its probability distribution and request id, and applied them.
+
+Two constraints shaped that result. PyTorch publishes no `win_arm64` wheel, so it runs as an `x86_64` build under Windows emulation. And Kev defaults to float32 weights, which does not fit this machine's commit limit (it has no page file); `KEV_DTYPE=bf16` is the documented serving precision and halves the footprint.
+
+At roughly 15 s per decision the model is far too slow to steer at the game's normal rate. Long runs need widened bounds:
+
+```powershell
+godot --headless --path . -- --auto-run --seeds=303 --episode-duration=100 --external-timeout-ms=40000 --max-stale-ticks=6000 --traffic-density=0.12
+```
+
+### What is still unproven
+
+- No fine-tuned checkpoint exists, so the `fine_tuned_model` path is implemented but unrun.
+- The model's gameplay performance has not been measured against the rule-based baseline.
+- The measured latency is specific to emulated x86-64 CPU inference on this hardware. A native build, or a smaller state, would be materially faster.
 
 ## Telemetry and data
 
@@ -165,6 +210,7 @@ godot --headless --path . --script res://tests/simulation_test.gd
 godot --headless --path . --script res://tests/game_flow_test.gd
 godot --headless --path . --script res://tests/network_test.gd
 godot --headless --path . --script res://tests/telemetry_test.gd
+godot --headless --path . --script res://tests/options_test.gd
 ```
 
 The Godot checks cover seeded reproducibility, physical versus target lane, legal-action generation, terminal snapshot uniqueness, synthetic keyboard input, the title/pause/crash/restart/menu flow, command validation, and telemetry persistence including write-failure recovery. The Python checks cover policy provenance, action legality, the Kev request and response contract against a mock HTTP endpoint, decision timeouts, dataset joins and leakage, the Kev training export, seed-grouped splits, and comparison metrics.
@@ -177,10 +223,10 @@ python -m pip install -r python/requirements.txt
 
 ## Current limitations
 
-- Real Kev-0.8B CPU inference still needs to be verified on the target environment. The adapter is currently proven only against a mock service.
+- Real Kev-0.8B CPU inference works on this machine, but it is slow enough (about 15 s per decision) that it cannot steer at the game's normal decision rate.
 - Fine-tuning has not been performed, and the model's effect on gameplay has not been measured.
 - The game is a simple experimental environment, not a realistic traffic simulator. Vehicles move along fixed lanes at constant speeds, and there is no acceleration model for traffic.
-- The compatibility renderer is used by default so the game runs on machines without a GPU. It has no depth fog, so distance haze is approximated with a procedural sky gradient.
+- The compatibility renderer is used by default so the game runs on machines without a GPU. It has no depth fog, so distance haze is approximated with a procedural sky gradient. Real-time shadow maps are replaced with soft blob decals for the same reason.
 - Steering is discrete: the motorcycle changes lanes on rails rather than being steered continuously.
 
 ## Roadmap
@@ -195,6 +241,7 @@ python -m pip install -r python/requirements.txt
 
 ```text
 project.godot            Godot project settings
+kev_models.example.json  Template registry of model policies
 scenes/main.tscn         Main scene; the world is built procedurally at runtime
 scripts/main.gd          World construction, camera, HUD, input, episode flow
 scripts/sim/simulation.gd Authoritative simulation: state, actions, seeded traffic, collisions
@@ -202,6 +249,7 @@ scripts/net/net_bridge.gd WebSocket client and command validation
 scripts/telemetry/telemetry_logger.gd  Buffered JSONL writer
 python/server.py         Controller server and policy selection
 python/policy.py         Policy interface and decision record
+python/kev_state.py      The one state projection shared by inference and training
 python/policies/         dummy, rule_based, and the Kev System One adapter
 python/dataset_prep.py   Log validation, candidate building, Kev training export
 python/experiment_runner.py  Seeded policy comparison across scenarios

@@ -184,8 +184,29 @@ class DatasetPreparationTests(unittest.TestCase):
         self.assertEqual(question["label"], "LEFT")
         self.assertIn("LEFT", question["criteria"])
         self.assertNotIn("RIGHT", question["criteria"])
-        self.assertNotIn("episode_id", training["state"])
         self.assertNotIn("outcome", training)
+        self.assertNotIn("outcome", training["state"])
+
+    def test_training_state_is_the_same_projection_the_model_sees(self):
+        from kev_state import compact_kev_state
+        from policies.model_adapter import KevSystemOnePolicy
+
+        game_state = state(10)
+        game_state["legal_actions"] = ["LEFT", "STAY", "BRAKE"]
+        game_state["player"]["target_lane"] = 0
+        game_state["player"]["lane_change_in_progress"] = True
+        candidate = {
+            "example_id": "episode-a:3", "episode_id": "episode-a", "scenario_seed": 17,
+            "decision_seq": 3, "decision_tick": 10, "application_tick": 10,
+            "state_id": "episode-a:10", "state": game_state, "action": "LEFT",
+            "label_source": "human", "outcome": None,
+        }
+        training_state = make_kev_training_record(candidate)["state"]
+        request_state = KevSystemOnePolicy.build_request(game_state, "kev-latest")["state"]
+        self.assertEqual(training_state, request_state)
+        self.assertEqual(training_state, compact_kev_state(game_state))
+        # absolute world coordinates are not part of the decision
+        self.assertNotIn("position", training_state["player"])
 
     def test_kev_training_requires_explicit_approval_and_source_selection(self):
         candidate = {

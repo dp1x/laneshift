@@ -104,7 +104,8 @@ func reset(scenario_seed: int, cfg: Dictionary = {}, requested_episode_id: Strin
 	})
 
 func _spawn_initial() -> void:
-	var n := int(rng.randi_range(2, 4))
+	var density := float(config.get("traffic_density", 1.0))
+	var n := int(round(float(rng.randi_range(2, 4)) * max(0.0, density)))
 	for i in range(n):
 		_spawn_vehicle(player_z + 30.0 + i * 18.0)
 

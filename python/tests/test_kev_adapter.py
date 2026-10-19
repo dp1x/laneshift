@@ -72,7 +72,12 @@ class KevAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         request = captured[0]
         self.assertEqual(request["model"], "kev-latest")
-        self.assertEqual(request["state"]["state_id"], "ep-44-2:120")
+        self.assertEqual(request["state"]["episode_id"], "ep-44-2")
+        self.assertEqual(request["state"]["sim_time_s"], 2.0)
+        self.assertEqual(request["state"]["player"]["lane"], 1)
+        self.assertEqual(request["state"]["player"]["speed"], 24.0)
+        self.assertEqual(request["state"]["traffic"][0]["relative_distance"], 12.0)
+        self.assertEqual(request["state"]["traffic"][0]["relative_speed"], 5.0)
         question = request["questions"]["next_action"]
         self.assertEqual(question["type"], "choice")
         self.assertEqual(set(question["criteria"]), {"LEFT", "STAY", "BRAKE"})

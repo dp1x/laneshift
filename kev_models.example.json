@@ -1,0 +1,16 @@
+{
+  "kev_original": {
+    "base_url": "http://127.0.0.1:8009",
+    "model": "kev-latest",
+    "expected_run": "jaredpalmer/kev-0.8b@v1.0",
+    "label_source": "original_model",
+    "timeout": 30.0
+  },
+  "kev_finetuned": {
+    "base_url": "http://127.0.0.1:8009",
+    "model": "kev-latest",
+    "expected_run": "runs/laneshift-finetune-v1",
+    "label_source": "fine_tuned_model",
+    "timeout": 30.0
+  }
+}

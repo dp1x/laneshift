@@ -67,10 +67,12 @@ var auto_running: bool = false
 var auto_episode_duration: float = 0.0
 var action_event_sequence: int = 0
 var external_timeout_msec: int = 1500
+var max_stale_ticks: int = 30
+var traffic_density_override: float = -1.0
 var last_external_action_msec: int = 0
 var websocket_port: int = 8765
 var decision_state_history: Dictionary = {}
-var decision_state_history_limit: int = 64
+var decision_state_history_seconds: float = 180.0
 var last_score_milestone: int = 0
 
 var road_segments: Array = []
@@ -103,6 +105,7 @@ func _ready() -> void:
 	telemetry.start_session()
 	net = NetBridge.new()
 	net.url = "ws://127.0.0.1:%d" % websocket_port
+	net.max_stale_ticks = max_stale_ticks
 	add_child(net)
 	net.action_received.connect(_on_net_action)
 	net.reset_received.connect(_on_net_reset)
@@ -116,25 +119,68 @@ func _parse_args() -> void:
 	var args := OS.get_cmdline_user_args()
 	if args.is_empty():
 		args = OS.get_cmdline_args()
-	for a in args:
-		if a.begins_with("--auto-run"):
-			auto_run = true
-		elif a.begins_with("--seeds="):
-			var s := a.substr(8)
-			auto_seeds = []
-			for part in s.split(","):
-				auto_seeds.append(int(part))
-		elif a.begins_with("--episodes="):
-			auto_episodes_per_seed = int(a.substr(11))
-		elif a.begins_with("--max-episodes="):
-			auto_max_episodes = int(a.substr(15))
-		elif a.begins_with("--episode-duration="):
-			auto_episode_duration = float(a.substr(19))
-		elif a.begins_with("--ws-port="):
-			websocket_port = clampi(int(a.substr(10)), 1, 65535)
+	var options := parse_options(args)
+	auto_run = bool(options["auto_run"])
+	auto_seeds = options["seeds"]
+	auto_episodes_per_seed = int(options["episodes"])
+	auto_max_episodes = int(options["max_episodes"])
+	auto_episode_duration = float(options["episode_duration"])
+	websocket_port = int(options["ws_port"])
+	external_timeout_msec = int(options["external_timeout_ms"])
+	max_stale_ticks = int(options["max_stale_ticks"])
+	traffic_density_override = float(options["traffic_density"])
+	decision_state_history_seconds = float(options["decision_history_s"])
 	if auto_seeds.is_empty():
 		auto_seeds = [1]
 	auto_episodes_per_seed = max(1, auto_episodes_per_seed)
+
+## Parses "--key=value" options. Splitting on the first "=" keeps the value
+## intact, so an option can never be silently mis-read.
+static func parse_options(args: PackedStringArray) -> Dictionary:
+	var options := {
+		"auto_run": false,
+		"seeds": [],
+		"episodes": 1,
+		"max_episodes": 0,
+		"episode_duration": 0.0,
+		"ws_port": 8765,
+		"external_timeout_ms": 1500,
+		"max_stale_ticks": 30,
+		"traffic_density": -1.0,
+		"decision_history_s": 180.0
+	}
+	for arg in args:
+		if arg == "--auto-run":
+			options["auto_run"] = true
+			continue
+		var split := arg.split("=", true, 1)
+		if split.size() != 2:
+			continue
+		var key := split[0]
+		var value := split[1]
+		match key:
+			"--seeds":
+				var seeds: Array = []
+				for part in value.split(",", false):
+					seeds.append(int(part))
+				options["seeds"] = seeds
+			"--episodes":
+				options["episodes"] = int(value)
+			"--max-episodes":
+				options["max_episodes"] = int(value)
+			"--episode-duration":
+				options["episode_duration"] = float(value)
+			"--ws-port":
+				options["ws_port"] = clampi(int(value), 1, 65535)
+			"--external-timeout-ms":
+				options["external_timeout_ms"] = maxi(int(value), 100)
+			"--max-stale-ticks":
+				options["max_stale_ticks"] = maxi(int(value), 1)
+			"--traffic-density":
+				options["traffic_density"] = maxf(float(value), 0.0)
+			"--decision-history-s":
+				options["decision_history_s"] = maxf(float(value), 1.0)
+	return options
 
 func _build_world() -> void:
 	# lighting
@@ -827,11 +873,12 @@ func _remember_decision_state(snapshot: Dictionary) -> void:
 	if tick < 0 or snapshot.get("episode_id", "") != sim.episode_id:
 		return
 	decision_state_history[tick] = snapshot.duplicate(true)
-	if decision_state_history.size() > decision_state_history_limit:
-		var ticks: Array = decision_state_history.keys()
-		ticks.sort()
-		while ticks.size() > decision_state_history_limit:
-			decision_state_history.erase(ticks.pop_front())
+	# Retain by age, not by count: a slow model may answer long after the
+	# state it saw, and that exact snapshot must still be available.
+	var oldest_kept := tick - int(decision_state_history_seconds * 60.0)
+	for stored_tick in decision_state_history.keys():
+		if int(stored_tick) < oldest_kept:
+			decision_state_history.erase(stored_tick)
 
 func _get_decision_state(tick: int) -> Dictionary:
 	var snapshot: Dictionary = decision_state_history.get(tick, {})
@@ -1088,6 +1135,8 @@ func _auto_start_next() -> void:
 	var cfg := DEFAULT_CONFIG.duplicate(true)
 	if auto_episode_duration > 0.0:
 		cfg["episode_duration"] = auto_episode_duration
+	if traffic_density_override >= 0.0:
+		cfg["traffic_density"] = traffic_density_override
 	external_control = true
 	control_mode = "auto"
 	start_game(seed, cfg)
