@@ -9,6 +9,7 @@ import json
 import math
 import os
 import statistics
+import sys
 import time
 from collections import Counter
 from pathlib import Path
@@ -19,7 +20,7 @@ import httpx
 
 from policy import PolicyDecision
 from policies.dummy import DummyPolicy
-from policies.model_adapter import KevSystemOnePolicy
+from policies.model_adapter import KevInferenceError, KevSystemOnePolicy
 from policies.rule_based import RuleBasedPolicy
 
 PROTOCOL_VERSION = 1
@@ -442,3 +443,6 @@ if __name__ == "__main__":
         asyncio.run(run_server(parse_args()))
     except KeyboardInterrupt:
         pass
+    except (ValueError, KevInferenceError) as error:
+        print(f"controller startup failed: {error}", file=sys.stderr, flush=True)
+        sys.exit(2)
