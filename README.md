@@ -150,11 +150,13 @@ The Python controller talks to a Kev System One server over HTTP; Godot never sp
 Kev requires Python 3.12 or 3.13 and `uv`. Following the official project:
 
 ```powershell
-git clone https://github.com/jaredpalmer/kev
+git clone https://github.com/jaredpalmer/kev.git
 cd kev
-uv sync
-uv run kev serve            # serves the released checkpoint on http://127.0.0.1:8009
+uv sync --extra serve
+uv run --extra serve python -m kev.serve --run jaredpalmer/kev-4b --port 8009
 ```
+
+`--run` also accepts a local checkpoint directory or a Hub revision such as `jaredpalmer/kev-4b@qwen3`. The first run downloads the adapter and the base model. Use `--device cpu` to skip accelerator discovery.
 
 Check the served identity before connecting a controller:
 
@@ -162,7 +164,7 @@ Check the served identity before connecting a controller:
 python -c "import json,urllib.request; print(json.load(urllib.request.urlopen('http://127.0.0.1:8009/v1/models'))['models'])"
 ```
 
-Record the `run` value of the served model. The controller refuses to label a run as a model unless that value matches `expected_run`, so a swapped or missing checkpoint fails loudly instead of producing fake model results.
+That endpoint returns one card per accepted model name with `name`, `description`, `release_date` and the serving details, including `run` — the checkpoint string that was actually loaded. The controller refuses to label a run as a model unless that `run` value matches `expected_run`, so a swapped or missing checkpoint fails loudly instead of producing fake model results.
 
 ### Configuring the model adapter
 
@@ -200,6 +202,8 @@ Launch the game, start a run, and press `T` to hand control to the controller. T
 Useful flags: `--decision-timeout` bounds how long the controller waits for one decision, `--inference-timeout` bounds the HTTP call, `--kev-base-url` / `--kev-model` / `--kev-expected-run` / `--kev-label-source` configure a single model without a registry file, and `--metrics-out` writes a metrics JSON.
 
 A model decision is only sent if it is one of the actions the simulator reported as legal in the state the model saw. Timeouts, malformed responses, illegal choices and identity mismatches fall back to a safe `STAY` labelled `controller_fallback`, and each decision records the model id, the full probability distribution, model-reported latency, client latency, request id, request payload and response payload.
+
+The adapter follows the official implementation rather than a remembered schema. The request is `{"state": ..., "model": ..., "questions": {...}}`, matching Kev's `SystemOneRequest` (`state`, `model` defaulting to `kev-latest`, `questions`). The answer is read from `answers.next_action` as `{"type": "choice", "choice", "confidence", "probabilities"}` with probabilities keyed by criteria name, and latency is taken from the top-level `latency_ms`. The server's `x-typesafe-request-id` header is recorded per decision. Nested objects and arrays in the state are serialized by Kev as labelled text, so the structured state is sent as data, never as a screenshot.
 
 ### Exercising the bridge without a model
 
@@ -262,14 +266,31 @@ Only explicitly approved examples with a valid, legal label are exported, and co
 
 ### Fine-tuning
 
-LaneShift does not fine-tune anything itself. Use the official Kev training interface with the exported files, following the current documentation in the Kev repository. The exported rows already match Kev's custom labelled-data shape (`state` plus a `questions` object whose choice question carries `label`), so they can be used directly with Kev's training command, for example:
+LaneShift does not fine-tune anything itself. Use the official Kev training interface with the exported files, following the current documentation in the Kev repository. The exported rows already match Kev's custom labelled-data format exactly: a JSONL file with one request per line, shaped like an API request plus a `label` on every question. For a `choice` question the label is the option name.
+
+Start from a released checkpoint with `--init_from` so the model keeps what Kev already knows:
 
 ```powershell
 cd kev
-uv run kev train --data ..\data\kev_training.train.jsonl --base jaredpalmer/kev-0.8b --out runs\laneshift-finetune-v1
+uv run python -m kev.train --data ..\data\kev_training.train.jsonl --base Qwen/Qwen3.5-4B-Base --init_from jaredpalmer/kev-4b --epochs 2 --lr 2e-5 --batch 1 --accum 8 --dtype bf16 --checkpointing 1 --device cuda --out runs/mine
 ```
 
-Use the manifest to keep the validation and test scenarios out of training, and record the resulting run id: that value is what `expected_run` must contain before the fine-tuned checkpoint may be labelled `fine_tuned_model` in a controller registry. No fine-tuning has been run in this repository, and no claim about improved gameplay has been made.
+`--batch 1 --accum 8` in bf16 fits the 0.8B model on a 4 GB GPU. The base must match the checkpoint you start from, and the trainer verifies the base, revision, LoRA rank and head size before loading anything. Use a smaller learning rate than the from-scratch recipe.
+
+Evaluate the result, then serve it:
+
+```powershell
+uv run python -m kev.benchmark --run runs/mine --data ..\data\kev_training.test.jsonl --out runs/mine-eval
+uv run --extra serve python -m kev.serve --run runs/mine --port 8009
+```
+
+The served `run` value is now `runs/mine`. That is the value `expected_run` must contain in the controller registry before the checkpoint may be labelled `fine_tuned_model`:
+
+```json
+{"kev_finetuned": {"base_url": "http://127.0.0.1:8009", "model": "kev-latest", "expected_run": "runs/mine", "label_source": "fine_tuned_model", "timeout": 0.4}}
+```
+
+Use the manifest to keep the validation and test scenarios out of training, and keep 10–20% of the file aside for evaluation as the Kev documentation advises. No fine-tuning has been run in this repository, and no claim about improved gameplay has been made.
 
 ## Checks
 

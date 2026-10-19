@@ -23,6 +23,8 @@ TRANSCRIPT: list[dict] = []
 
 class KevHandler(BaseHTTPRequestHandler):
     model_alias = "kev-latest"
+    # The real server accepts both names for the same checkpoint.
+    model_names = ("kev-latest", "jev-latest")
     run_id = "jaredpalmer/kev-0.8b"
     base_model = "Qwen/Qwen3.5-0.8B-Base"
     transcript_path: Path | None = None
@@ -41,16 +43,19 @@ class KevHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.rstrip("/") == "/v1/models":
-            self._send_json({
-                "models": [{
-                    "name": self.model_alias,
-                    "run": self.run_id,
-                    "base": self.base_model,
-                    "param_count": 0.8,
-                    "quantization": "none",
-                    "context_length": 32768,
-                }]
-            })
+            card = {
+                "description": f"Kev pointer head on {self.base_model}, serving {self.run_id}",
+                "release_date": "2026-01-01",
+                "run": self.run_id,
+                "base": self.base_model,
+                "lora": "mock",
+                "device": "cpu",
+                "backend": "mock",
+                "dtype": "float32",
+                "temperature": 1.0,
+                "max_state_tokens": 65536,
+            }
+            self._send_json({"models": [{"name": name, **card} for name in self.model_names]})
             return
         self._send_json({"error": "not found"}, status=404)
 
