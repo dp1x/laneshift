@@ -130,6 +130,7 @@ func _run() -> void:
 				terminal_snapshot_count += 1
 		telemetry_file.close()
 	_check(terminal_snapshot_count == 1, "ended episode should persist exactly one terminal state, never repeated terminal ticks")
+	_check(_steering_matches_screen(game), "steering must move the player in the direction the player sees")
 	game.free()
 	if failures.is_empty():
 		print("GAME_FLOW_TESTS_PASS")
@@ -138,6 +139,20 @@ func _run() -> void:
 		for failure in failures:
 			push_error(failure)
 		quit(1)
+
+func _steering_matches_screen(game) -> bool:
+	game.sim.reset(4242, {"traffic_density": 0.0})
+	game.sim.traffic.clear()
+	game.sim.next_spawn_z = 100000.0
+	game._update_camera(true)
+	var camera_forward: Vector3 = -game.camera.global_transform.basis.z
+	var screen_right: Vector3 = camera_forward.cross(Vector3.UP).normalized()
+	var before: float = (game.sim.get_snapshot()["player"]["position"]["x"] - game.camera.global_position.x) * screen_right.x
+	game.sim.apply_action("LEFT", 0.4, "human")
+	for i in range(40):
+		game.sim.step(1.0 / 60.0)
+	var after: float = (game.sim.get_snapshot()["player"]["position"]["x"] - game.camera.global_position.x) * screen_right.x
+	return after < before
 
 func _check(condition: bool, message: String) -> void:
 	if not condition:

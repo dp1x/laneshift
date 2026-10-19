@@ -43,7 +43,8 @@ func _test_action_changes_lane_and_braking_speed() -> void:
 	_check(sim.apply_action("LEFT", 0.4, "human"), "valid lane change should be accepted")
 	var initial_x: float = sim.player_x
 	sim.step(1.0 / 60.0)
-	_check(sim.player_x < initial_x, "lane change should move player laterally")
+	_check(sim.player_x != initial_x, "lane change should move player laterally")
+	_check(sim.player_x > initial_x, "a LEFT command must move toward the left lane centre")
 	_check(sim.player_lane == 1 and sim.player_target_lane == 0, "current lane must remain physical until transition completes")
 	var speed_before: float = sim.player_speed
 	_check(sim.apply_action("BRAKE", 0.5, "human"), "brake action should be accepted")

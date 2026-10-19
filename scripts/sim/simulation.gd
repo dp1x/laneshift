@@ -6,7 +6,11 @@ signal episode_ended(summary: Dictionary)
 signal scenario_initialized(info: Dictionary)
 signal vehicle_overtaken(vehicle_id: String)
 
-const LANE_CENTERS := [-4.0, 0.0, 4.0]
+# Lane index 0 is the leftmost lane as the driver sees it.
+# The chase camera looks along +Z, so its screen-right vector is world -X;
+# that puts the driver's left at positive X. Lane centers are therefore
+# +4 (left), 0 (centre), -4 (right) metres in world X.
+const LANE_CENTERS := [4.0, 0.0, -4.0]
 const LANE_COUNT := 3
 
 var seed_value: int = 1

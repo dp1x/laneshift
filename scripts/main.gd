@@ -10,8 +10,8 @@ const DEFAULT_CONFIG := {
 	"base_speed": 20.0,
 	"max_speed": 28.0
 }
-const GROUND_SEGMENT_LENGTH := 2000.0
-const GROUND_SEGMENT_COUNT := 3
+const GROUND_SEGMENT_LENGTH := 3000.0
+const GROUND_SEGMENT_COUNT := 4
 const GROUND_RECYCLE_MARGIN := 250.0
 
 var sim: Simulation
@@ -24,6 +24,7 @@ var traffic_root: Node3D
 var road_root: Node3D
 var tree_root: Node3D
 var ground_segments: Array[MeshInstance3D] = []
+var blob_shadow_texture: GradientTexture2D = null
 
 var ui_layer: CanvasLayer
 var hud: Control
@@ -139,23 +140,28 @@ func _build_world() -> void:
 	# lighting
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-45, -30, 0)
-	sun.shadow_enabled = true
+	# Real-time shadow maps are the single most expensive effect on a machine
+	# without a GPU, so shadows are drawn as cheap blob decals instead.
+	sun.shadow_enabled = false
 	sun.light_energy = 1.2
 	add_child(sun)
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
-	e.background_mode = Environment.BG_COLOR
-	e.background_color = Color(0.55, 0.72, 0.9)
+	# The compatibility renderer has no depth fog, so the sky carries the haze:
+	# its horizon band is tinted to meet the ground colour.
+	var sky_material := ProceduralSkyMaterial.new()
+	sky_material.sky_top_color = Color(0.42, 0.6, 0.86)
+	sky_material.sky_horizon_color = Color(0.66, 0.76, 0.78)
+	sky_material.ground_horizon_color = Color(0.58, 0.7, 0.72)
+	sky_material.ground_bottom_color = Color(0.14, 0.22, 0.2)
+	sky_material.sun_angle_max = 40.0
+	var sky := Sky.new()
+	sky.sky_material = sky_material
+	e.background_mode = Environment.BG_SKY
+	e.sky = sky
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	e.ambient_light_color = Color(0.6, 0.65, 0.7)
 	e.ambient_light_energy = 0.4
-	# Distance fog hides the far edge of the recycled ground and gives the road depth.
-	e.fog_enabled = true
-	e.fog_light_color = Color(0.62, 0.75, 0.88)
-	e.fog_light_energy = 1.0
-	e.fog_density = 0.00042
-	e.fog_sky_affect = 0.0
-	e.fog_aerial_perspective = 0.0
 	env.environment = e
 	add_child(env)
 
@@ -163,7 +169,7 @@ func _build_world() -> void:
 	road_root = Node3D.new()
 	add_child(road_root)
 	var ground_material := StandardMaterial3D.new()
-	ground_material.albedo_color = Color(0.12, 0.2, 0.18)
+	ground_material.albedo_color = Color(0.16, 0.25, 0.22)
 	for i in range(GROUND_SEGMENT_COUNT):
 		var ground := MeshInstance3D.new()
 		ground.name = "GroundSegment%d" % i
@@ -241,12 +247,42 @@ func _create_road_segment() -> Node3D:
 	return seg
 
 func _build_trees() -> void:
-	for i in range(40):
+	for i in range(28):
 		var t := _create_tree()
 		var side := -1 if i % 2 == 0 else 1
-		t.position = Vector3(side * rng_visual.randf_range(8.0, 14.0), 0, i * 8.0 - 40.0)
+		t.position = Vector3(side * rng_visual.randf_range(8.0, 14.0), 0, i * 11.0 - 40.0)
 		tree_root.add_child(t)
 		tree_nodes.append(t)
+
+func _add_blob_shadow(parent: Node3D, size: Vector2, offset: Vector3 = Vector3.ZERO) -> void:
+	var shadow := MeshInstance3D.new()
+	var plane := PlaneMesh.new()
+	plane.size = size
+	shadow.mesh = plane
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(0.05, 0.07, 0.06, 0.5)
+	material.albedo_texture = _blob_shadow_texture()
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	shadow.material_override = material
+	shadow.position = Vector3(offset.x, 0.02, offset.z)
+	shadow.rotation_degrees = Vector3(-90, 0, 0)
+	parent.add_child(shadow)
+
+func _blob_shadow_texture() -> GradientTexture2D:
+	if blob_shadow_texture == null:
+		var gradient := Gradient.new()
+		gradient.set_color(0, Color(0, 0, 0, 0.85))
+		gradient.set_color(1, Color(0, 0, 0, 0))
+		blob_shadow_texture = GradientTexture2D.new()
+		blob_shadow_texture.gradient = gradient
+		blob_shadow_texture.fill = GradientTexture2D.FILL_RADIAL
+		blob_shadow_texture.fill_from = Vector2(0.5, 0.5)
+		blob_shadow_texture.fill_to = Vector2(1.0, 0.5)
+		blob_shadow_texture.width = 64
+		blob_shadow_texture.height = 64
+	return blob_shadow_texture
 
 func _create_tree() -> Node3D:
 	var t := Node3D.new()
@@ -255,6 +291,8 @@ func _create_tree() -> Node3D:
 	cm.top_radius = 0.2
 	cm.bottom_radius = 0.3
 	cm.height = 2.0
+	cm.radial_segments = 6
+	cm.rings = 1
 	trunk.mesh = cm
 	var tmat := StandardMaterial3D.new()
 	tmat.albedo_color = Color(0.35, 0.22, 0.12)
@@ -265,12 +303,15 @@ func _create_tree() -> Node3D:
 	var sm := SphereMesh.new()
 	sm.radius = 1.6
 	sm.height = 3.2
+	sm.radial_segments = 8
+	sm.rings = 4
 	foliage.mesh = sm
 	var fmat := StandardMaterial3D.new()
 	fmat.albedo_color = Color(0.18, 0.45, 0.2)
 	foliage.material_override = fmat
 	foliage.position.y = 3.2
 	t.add_child(foliage)
+	_add_blob_shadow(t, Vector2(3.4, 3.4), Vector3(0.7, 0, 0.4))
 	return t
 
 func _create_motorcycle() -> Node3D:
@@ -320,6 +361,7 @@ func _create_motorcycle() -> Node3D:
 	head.material_override = hmat
 	head.position = Vector3(0, 1.9, 0)
 	root.add_child(head)
+	_add_blob_shadow(root, Vector2(1.3, 2.0))
 	tail_light = MeshInstance3D.new()
 	var light_mesh := BoxMesh.new()
 	light_mesh.size = Vector3(0.28, 0.16, 0.08)
@@ -371,6 +413,7 @@ func _create_car(color: Color, is_truck: bool) -> Node3D:
 			wmat.albedo_color = Color(0.05, 0.05, 0.05)
 			w.material_override = wmat
 			root.add_child(w)
+	_add_blob_shadow(root, Vector2(2.2, 5.0 if not is_truck else 7.2))
 	return root
 
 func _build_ui() -> void:
@@ -993,19 +1036,19 @@ func _recycle_road() -> void:
 
 func _recycle_trees() -> void:
 	for t in tree_nodes:
-		if t.position.z < sim.player_z - 40:
-			t.position.z += 40 * 8.0
+		while t.position.z < sim.player_z - 40:
+			t.position.z += 28 * 11.0
 			var side := -1 if t.position.x < 0 else 1
 			t.position.x = side * rng_visual.randf_range(8.0, 14.0)
 
 func _update_camera(force: bool) -> void:
 	var target := Vector3(sim.player_x, 0, sim.player_z)
-	var cam_pos := target + Vector3(0, 6, -8)
+	var cam_pos := target + Vector3(0, 4.0, -6.2)
 	if force:
 		camera.position = cam_pos
 	else:
-		camera.position = camera.position.lerp(cam_pos, 0.1)
-	camera.look_at(target + Vector3(0, 1, 7), Vector3.UP)
+		camera.position = camera.position.lerp(cam_pos, 0.12)
+	camera.look_at(target + Vector3(0, 1.1, 9.0), Vector3.UP)
 
 func _update_hud() -> void:
 	score_label.text = "Score: %.0f" % sim.score
