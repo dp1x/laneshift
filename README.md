@@ -1,303 +1,165 @@
 # LANESHIFT
 
-LANESHIFT is a small, original three-lane arcade motorcycle game and a reproducible controller experiment environment. Godot owns all simulation state; Python policies receive structured snapshots over a localhost WebSocket and return discrete actions. The game and telemetry work without Python.
+A telemetry-first driving simulator for experimenting with small AI decision models.
 
-## Requirements
+LANESHIFT is an early-stage research prototype. It provides a small driving environment in which a human or an external controller can play, while the simulator records state and outcomes directly.
 
-- Godot 4.7.2 Stable
-- Python 3.10 or newer
-- Python dependency: `websockets` (listed in `python/requirements.txt`)
+The project is intended to support experiments in fine-tuning compact decision models. The game exports structured telemetry, records discrete events, and exposes a programmatic control interface so the same scenarios can be tested across different controllers.
 
-Install the Python dependency once:
+## Current status
+
+What works today:
+
+- A playable Godot driving simulator with human keyboard controls, a title screen, HUD, pause, game over and restart.
+- Simulation-state export and periodic telemetry at roughly 30 Hz of simulation time.
+- Event-based action and episode logs.
+- A Python controller communicating with the game over a localhost WebSocket.
+- Dummy and rule-based policies, both usable as baselines.
+- Dataset conversion and experiment tooling, including a Kev-format training export.
+- A Kev System One adapter, tested against a mock service.
+
+What has **not** been established:
+
+- The real Kev-0.8B checkpoint has not been verified in this environment. The adapter is proven only against a mock service that reproduces the documented HTTP contract.
+- No fine-tuning has been performed.
+- No claim has been made that any model improves gameplay over the rule-based baseline.
+
+The game itself is a rough prototype. Its graphics are functional low-poly shapes, the driving model is kinematic rather than physical, and both are still being iterated on. Do not treat it as polished or production-ready.
+
+## Running the game
+
+Requires Godot 4.7.2 Stable.
 
 ```powershell
-python -m pip install -r python/requirements.txt
+godot --path .
 ```
 
-Godot must be available as `godot` on `PATH`, or its executable can be passed to the Python experiment runner with `--godot`.
+On Windows, `run_game.bat` does the same thing and checks that Godot is on `PATH`.
 
-## Play
+Controls:
 
-Run `run_game.bat` on Windows, or launch the project with `godot --path .`. Select **Start** on the title screen.
+| Key | Action |
+| --- | --- |
+| `A` / Left Arrow | Move one lane left |
+| `D` / Right Arrow | Move one lane right |
+| `Space` / Down Arrow | Brake (hold) |
+| `T` | Switch between human and connected controller |
+| `Escape` | Pause or resume |
 
-- `A` / Left Arrow: move left one lane
-- `D` / Right Arrow: move right one lane
-- Hold Space / Down Arrow: brake
-- `Escape`: pause or resume
-- `T`: switch between human and connected Python control while driving
+Lane changes ease over about half a second and are applied once per press. Braking slows the bike, which changes how quickly traffic is caught. A collision ends the run.
 
-The lane change eases over time; a steering press is applied once rather than repeating while held. Passing traffic awards a small bonus. A collision or configured episode duration ends the run. The result screen offers restart and menu options. Best score is stored in `user://highscore.save`. **Open Logs** on the title screen opens the local run directory.
+## Running the Python controller
 
-To use Python control, start the controller first in a separate terminal, then launch the game and press `T` during a run:
+The controller is a separate process. Start it first, then launch the game, start a run, and press `T` to hand control over.
 
 ```powershell
+# dummy: scripted lane changes, used to verify the bridge
+python python/server.py --policy dummy
+
+# rule-based: traffic avoidance baseline
 python python/server.py --policy rule_based
 ```
 
-Available policies are `dummy` and `rule_based`, plus any model policy named in a model registry (see **Kev Model Control**). The dummy policy deliberately changes lanes so the bridge can be smoke-tested. A model policy must be configured with the checkpoint it really loads; there is no stub that silently returns `STAY` under a model name.
+The controller binds to `127.0.0.1:8765` only. Godot connects to it, streams state snapshots, and applies the actions that come back. If the controller is not running, the game stays fully playable with the keyboard. If the controller disconnects or stops sending actions, the game reverts to keyboard control after 1.5 seconds.
 
-## Architecture
+## Telemetry and data
 
-- `scripts/sim/simulation.gd` owns time, player actions, speed, seeded traffic, collisions, scoring, legal actions and snapshots.
-- `scripts/main.gd` builds the procedural world, camera, HUD, input, presentation, and episode flow. Both keyboard and external input call the same simulation action method.
-- `scripts/telemetry/telemetry_logger.gd` buffers JSONL records and writes batches on a worker thread; episode boundaries and exit drain the queue.
-- `scripts/net/net_bridge.gd` is an optional Godot WebSocket client. It validates protocol messages and falls back to human control after disconnect or action timeout.
-- `python/server.py` hosts the loopback WebSocket endpoint and keeps policy, protocol, action counts, and decision latency outside Godot. Inference runs asynchronously so a slow model never blocks the socket.
-- `python/policies/` contains the scripted policy, the rule-based baseline, and the Kev System One adapter.
-- `python/dataset_prep.py` joins event decisions to pre-action observations, separates outcomes from model inputs, and exports Kev-format training records.
-- `python/experiment_runner.py` starts one controller and one headless Godot run per policy, reusing scenario seeds and writing a comparison CSV plus per-episode results.
-
-All visuals are made from primitive Godot meshes and materials; there are no downloaded assets. The simulation is kinematic and lane-based rather than a rigid-body motorcycle model.
-
-## Coordinates And Timing
-
-- World `X` is lateral: negative is left, positive is right. Lane centers are `-4`, `0`, and `+4` meters.
-- World `Y` is up. World `+Z` is forward. The player advances in `+Z`; traffic also moves in `+Z` at its own speed.
-- `player.lane` is the physical lane the motorcycle currently occupies; `player.target_lane` is the lane it is moving toward. The two differ while a transition is in progress, and `lane_change_in_progress` says so explicitly.
-- `legal_actions` is the simulation's own answer to "what may be done now": steering is unavailable during a transition, at a road edge, or while the lane-change cooldown is active.
-- Positions are meters and velocities are meters per second. HUD speed is kilometers per hour.
-- `relative_distance_z = traffic.z - player.z`: positive means ahead. `relative_speed_z = player.speed - traffic.speed`: positive means the player is closing.
-- The default physics rate is 60 Hz, telemetry is sampled at approximately 30 Hz, and states are sent for decisions at approximately 10 Hz. These rates are independent settings, not protocol assumptions.
-- Each snapshot has simulation time and physics tick plus Unix and monotonic wall-clock timestamps. Simulation time follows physics steps; wall time records observed process timing.
-
-The traffic generator uses its own seeded `RandomNumberGenerator`. A reset with the same seed and configuration reproduces initial vehicles and the subsequent spawn schedule, independent of visual randomness. Player actions are expected to make the resulting trajectories diverge.
-
-## Telemetry
-
-Each game launch writes to a unique directory under Godot's user data location:
+Every launch writes a new session directory under the Godot user data location:
 
 ```text
-user://runs/session_<timestamp>_<suffix>/
+%APPDATA%\Godot\app_userdata\LANESHIFT\runs\session_<timestamp>_<suffix>\
   telemetry.jsonl
   events.jsonl
   episodes.jsonl
 ```
 
-On Windows this is normally `%APPDATA%\Godot\app_userdata\LANESHIFT\runs\`. Use **Open Logs** in the title menu to open the parent folder. Records are one JSON object per line.
+These files are runtime data. They are not tracked by Git.
 
-`telemetry.jsonl` contains `state_id`, `episode_id`, `scenario_seed`, `sim_time`, `physics_tick`, player position/lane/target lane/transition state/speed/velocity/action, the authoritative `legal_actions`, nearby traffic IDs and their positions/velocities/lanes, relative gaps and speeds, score, distance, survival time, collision and episode status, control source, and wall timestamps. An episode that ends produces exactly one additional terminal snapshot with `snapshot_kind: "terminal"` and a unique state id; periodic sampling stops at that point, so no state is recorded twice for the same tick.
+The three files record different things:
 
-`events.jsonl` records scenario initialization (including configuration and initial traffic), episode reset, start and end, pause and resume, control connection/mode changes, collisions, overtakes, score milestones, external command receipt, validation, application and rejection, and action decisions. An `action_decision` contains requested and applied actions, acceptance, decision sequence, source labels, the controller-observed state ID/tick and exact `state_before` snapshot, plus separate application tick/time metadata and the controller's `decision_metadata`. For external control, `state_before` is the exact snapshot sent to the controller, even when the accepted command arrives several physics ticks later. Human actions use the current pre-action snapshot. Human actions are recorded even without a controller.
+- **`telemetry.jsonl`** holds periodic state snapshots, sampled on simulation time rather than render time. A snapshot is a complete description of the world at one physics tick.
+- **`events.jsonl`** holds discrete events: scenario initialisation, episode start/reset/end, action requests, action application, action rejections, collisions, pause and resume, controller connection changes.
+- **`episodes.jsonl`** holds one summary per finished episode.
 
-`episodes.jsonl` has one summary for each ended episode, with seed, score, distance, survival time, collision and overtake counts, final lane, action changes, and termination reason. Restart, menu exit, quit, and normal time-limit completion are also given termination reasons.
-
-Writes are buffered away from the simulation thread, periodically queued, and drained at episode boundaries and shutdown. A failed write is retried, then preserved in an emergency JSONL file under `user://runs/_recovery/<session>/`; if that also fails the batch is reported and logging is disabled rather than silently discarding data. The write queue is bounded, and exceeding it disables logging with a visible warning instead of growing without limit. Log directories and high scores remain local to the Godot user data directory.
-
-## WebSocket Protocol
-
-The Python server binds only to `127.0.0.1:8765`; it does not listen on a network interface. Protocol version is `1`. Godot sends `hello`, `state`, and `event` JSON messages. A state message is the snapshot object with `type: "state"` and `protocol_version: 1`.
-
-Python sends an action envelope such as:
-
-```json
-{"type":"action","protocol_version":1,"episode_id":"ep_123_1","seq":9,"tick":420,"action":"LEFT","duration":0.35,"label_source":"rule_based","decision_metadata":{}}
-```
-
-Actions are `LEFT`, `STAY`, `RIGHT`, and `BRAKE`. `seq` increases for each policy decision; `tick` identifies the state used for that decision. `duration` is optional and limited to 5 seconds. `decision_metadata` carries model provenance such as `model_id`, `model_alias`, `probabilities`, `model_latency_ms`, `client_latency_ms` and `request_id`.
-
-Every state message carries the authoritative `legal_actions` list computed by the simulation, and the action must be legal in the state the controller observed. Godot re-checks that against the stored decision snapshot, so a command cannot become valid merely by arriving late. Godot acknowledges a validated envelope with `"status": "validated"` — that is a transport acknowledgement, not a claim that the simulation applied the action; the `external_action_applied` event and the `action_decision` event record what actually happened. Rejections are reported for invalid actions, old episode IDs, duplicate sequences, stale/future ticks, invalid durations and illegal decision-time actions. Tick age is bounded to 30 physics ticks. Reset messages can request a seeded scenario and supported configuration values; unknown keys and out-of-range settings are rejected. `ping` receives `pong`.
-
-The server does not need to produce an action for every telemetry sample: it decides when it receives each decision-rate state, and a slow inference never blocks message processing. Decisions are discarded if the episode changed or the state became stale while the model was thinking. If external control is selected and no valid action arrives for 1.5 seconds, the game returns to human control. Disconnects also return a normal human-play session to keyboard control; reconnection is attempted by the game. The HUD shows both connection and selected control mode. `label_source` preserves training provenance (`human`, `rule_based`, `original_model`, `fine_tuned_model`, `synthetic`, or `controller_fallback`) independently of the engine control source.
-
-## Experiments
-
-Run reproducible episodes for the same seed list across one or more policies:
-
-```powershell
-python python/experiment_runner.py `
-  --godot godot `
-  --policies rule_based,dummy `
-  --seeds 101,202,303 `
-  --episodes-per-seed 1 `
-  --duration 30 `
-  --output results/comparison.csv
-```
-
-The runner starts and stops the local controller for each policy and runs Godot headlessly with the same seed/duration configuration. Its CSV reports mean score, distance and survival time, collision/completion frequency, final lanes, applied action counts, decision latency mean and percentiles, model latency, acknowledgements, invalid commands, and controller failures, plus the verified `model_id` when a checkpoint was actually loaded. Per-episode results are written next to the CSV as `<name>.episodes.jsonl`.
-
-Use `--dev-seeds` for exploratory scenarios and `--test-seeds` for held-out scenarios; each comparison row records which split it belongs to, and no seed appears in both.
-
-```powershell
-python python/experiment_runner.py `
-  --godot godot `
-  --policies rule_based,kev_original `
-  --dev-seeds 101,202 `
-  --test-seeds 901,902 `
-  --episodes-per-seed 2 `
-  --duration 30 `
-  --model-registry kev_models.json `
-  --output results/comparison.csv
-```
-
-Godot also supports automated seeded episodes without the Python runner:
-
-```powershell
-godot --headless --path . -- --auto-run --seeds=101,202 --episodes=1 --episode-duration=30
-```
-
-This mode writes the same telemetry and prints one `LANESHIFT_EPISODE` JSON summary per episode. With no Python server connected it uses no external actions; use `experiment_runner.py` for controlled policy comparisons.
-
-## Kev Model Control
-
-The Python controller talks to a Kev System One server over HTTP; Godot never speaks HTTP and never learns about Kev. The three layers stay separate:
-
-1. Godot owns the simulation and its WebSocket action interface (port `8765` by default).
-2. The Python controller owns policy selection, the System One request, and the response parsing.
-3. Kev serves inference over HTTP `POST /v1/systemone` (port `8009` by default).
-
-### Starting a Kev server
-
-Kev requires Python 3.12 or 3.13 and `uv`. Following the official project:
-
-```powershell
-git clone https://github.com/jaredpalmer/kev.git
-cd kev
-uv sync --extra serve
-uv run --extra serve python -m kev.serve --run jaredpalmer/kev-4b --port 8009
-```
-
-`--run` also accepts a local checkpoint directory or a Hub revision such as `jaredpalmer/kev-4b@qwen3`. The first run downloads the adapter and the base model. Use `--device cpu` to skip accelerator discovery.
-
-Check the served identity before connecting a controller:
-
-```powershell
-python -c "import json,urllib.request; print(json.load(urllib.request.urlopen('http://127.0.0.1:8009/v1/models'))['models'])"
-```
-
-That endpoint returns one card per accepted model name with `name`, `description`, `release_date` and the serving details, including `run` — the checkpoint string that was actually loaded. The controller refuses to label a run as a model unless that `run` value matches `expected_run`, so a swapped or missing checkpoint fails loudly instead of producing fake model results.
-
-### Configuring the model adapter
-
-Create `kev_models.json`:
+A real snapshot, trimmed to the interesting fields:
 
 ```json
 {
-  "kev_original": {
-    "base_url": "http://127.0.0.1:8009",
-    "model": "kev-latest",
-    "expected_run": "jaredpalmer/kev-0.8b",
-    "label_source": "original_model",
-    "timeout": 0.4
+  "state_id": "ep_7_1:2",
+  "episode_id": "ep_7_1",
+  "scenario_seed": 7,
+  "sim_time": 0.0333333333333333,
+  "physics_tick": 2,
+  "player": {
+    "lane": 1,
+    "target_lane": 1,
+    "lane_change_in_progress": false,
+    "speed": 20.1,
+    "position": {"x": 0.0, "y": 0.0, "z": 0.669166666666667},
+    "velocity": {"x": 0.0, "y": 0.0, "z": 20.1},
+    "current_action": "STAY"
   },
-  "kev_finetuned": {
-    "base_url": "http://127.0.0.1:8009",
-    "model": "kev-latest",
-    "expected_run": "runs/laneshift-finetune-v1",
-    "label_source": "fine_tuned_model",
-    "timeout": 0.4
-  }
+  "traffic": [
+    {"id": "veh_0", "lane": 1, "relative_distance_z": 31.4941673533122, "relative_speed_z": 4.89677772521973}
+  ],
+  "legal_actions": ["LEFT", "STAY", "RIGHT", "BRAKE"],
+  "score": 0.233583333333333,
+  "distance": 0.669166666666667,
+  "survival_time": 0.0333333333333333,
+  "episode_status": "running",
+  "control_source": "external_ai"
 }
 ```
 
-`label_source` is only accepted as `original_model` or `fine_tuned_model`, and the registry must name the checkpoint that is really running. The `dummy` and `rule_based` policies report themselves as `synthetic` and `rule_based` and never claim a model identity.
-
-### Running the controller
-
-```powershell
-python python/server.py --policy kev_original --kev-config kev_models.json --port 8765
-```
-
-Launch the game, start a run, and press `T` to hand control to the controller. The HUD shows the connection state and the active control mode.
-
-Useful flags: `--decision-timeout` bounds how long the controller waits for one decision, `--inference-timeout` bounds the HTTP call, `--kev-base-url` / `--kev-model` / `--kev-expected-run` / `--kev-label-source` configure a single model without a registry file, and `--metrics-out` writes a metrics JSON.
-
-A model decision is only sent if it is one of the actions the simulator reported as legal in the state the model saw. Timeouts, malformed responses, illegal choices and identity mismatches fall back to a safe `STAY` labelled `controller_fallback`, and each decision records the model id, the full probability distribution, model-reported latency, client latency, request id, request payload and response payload.
-
-The adapter follows the official implementation rather than a remembered schema. The request is `{"state": ..., "model": ..., "questions": {...}}`, matching Kev's `SystemOneRequest` (`state`, `model` defaulting to `kev-latest`, `questions`). The answer is read from `answers.next_action` as `{"type": "choice", "choice", "confidence", "probabilities"}` with probabilities keyed by criteria name, and latency is taken from the top-level `latency_ms`. The server's `x-typesafe-request-id` header is recorded per decision. Nested objects and arrays in the state are serialized by Kev as labelled text, so the structured state is sent as data, never as a screenshot.
-
-### Exercising the bridge without a model
-
-`python/tools/mock_kev_server.py` is a local test double for the Kev HTTP surface. It is not a model and must never be used to produce research results:
-
-```powershell
-python python/tools/mock_kev_server.py --port 8010 --transcript .godot/kev_transcript.jsonl
-python python/server.py --policy kev_mock --kev-config .godot/registry.json --port 8765
-```
-
-## Dataset Preparation
-
-Pass the three files from one session to prepare accepted decision examples:
-
-```powershell
-python python/dataset_prep.py `
-  --telemetry "$env:APPDATA\Godot\app_userdata\LANESHIFT\runs\SESSION\telemetry.jsonl" `
-  --events "$env:APPDATA\Godot\app_userdata\LANESHIFT\runs\SESSION\events.jsonl" `
-  --episodes "$env:APPDATA\Godot\app_userdata\LANESHIFT\runs\SESSION\episodes.jsonl" `
-  --output data/candidates.jsonl `
-  --eval-fraction 0.2 `
-  --split-seed 71
-```
-
-The tool joins each accepted action to its exact embedded decision-time state or latest preceding telemetry sample, rejects unaccepted commands as labels, reports malformed/incomplete records, and writes a separate report JSON. It exports all episode outcomes by default, with `outcome` separate from the feature-only `state`; model training must consume `state` and `action`, not `outcome`. Evaluation splitting keeps whole episodes together and groups repeated runs of the same scenario seed on one side to prevent scenario leakage. `--successful-only` exports only timeout/completion episodes, while the default keeps crash episodes for analysis.
-
-### Exporting Kev-format training records
-
-Training records are never produced automatically. Supply a review file of explicitly approved labels, each entry naming the example and the action:
+A real action event, from a run driven by the Kev adapter against the mock service:
 
 ```json
-{"example_id": "ep_101_1:action:3", "action": "LEFT", "approved": true, "reviewer": "name"}
+{
+  "event_id": "ep_5150_1:action:1",
+  "decision_seq": 1,
+  "controller_seq": 1,
+  "decision_tick": 7,
+  "application_tick": 7,
+  "state_id": "ep_5150_1:7",
+  "requested_action": "LEFT",
+  "applied_action": "LEFT",
+  "accepted": true,
+  "control_source": "original_model",
+  "label_source": "original_model"
+}
 ```
 
-Then export:
+`decision_tick` is the tick the controller saw; `application_tick` is the tick the action was applied. They differ when a decision takes time to arrive, which is the normal case with a model in the loop.
+
+### Coordinates and units
+
+- `X` is lateral, `Y` is up, `Z` is forward. The player advances in `+Z`; traffic also moves in `+Z` at its own speed.
+- The chase camera looks along `+Z`, so its screen-right vector is world `-X`. Lane index `0` is therefore the leftmost lane on screen and sits at `+4 m` in world `X`; lane `2` is the rightmost at `-4 m`.
+- `player.lane` is the lane the motorcycle currently occupies. `player.target_lane` is where it is heading. They differ while `lane_change_in_progress` is true.
+- Positions are metres, velocities are metres per second, HUD speed is km/h.
+- `relative_distance_z = traffic.z - player.z`, so positive means the vehicle is ahead. `relative_speed_z = player.speed - traffic.speed`, so positive means the player is closing.
+- `legal_actions` is the simulation's own answer to what may be done now. It is the same list used to validate keyboard input and external commands, so nothing has to guess whether a steering action is currently possible.
+
+## Architecture
+
+```text
+Godot simulation -> state and event telemetry -> Python controller -> decision policy -> action back to Godot
+```
+
+The game owns the authoritative state. Coordinates, velocities, traffic positions and vehicle identities are read directly from the simulation's variables; nothing is inferred from rendered pixels, and no screenshot is ever sent to a model. The policy layer sits entirely outside the engine: Python receives structured snapshots, decides, and sends back one of four actions (`LEFT`, `STAY`, `RIGHT`, `BRAKE`).
+
+Human input and controller input go through the same action entry point in the simulation, so both are subject to the same legality rules and produce the same telemetry.
+
+## Testing
 
 ```powershell
-python python/dataset_prep.py `
-  --telemetry "$env:APPDATA\Godot\app_userdata\LANESHIFT\runs\SESSION\telemetry.jsonl" `
-  --events "$env:APPDATA\Godot\app_userdata\LANESHIFT\runs\SESSION\events.jsonl" `
-  --episodes "$env:APPDATA\Godot\app_userdata\LANESHIFT\runs\SESSION\episodes.jsonl" `
-  --output data/kev_training.jsonl `
-  --format kev `
-  --approved-records data/approved.jsonl `
-  --include-sources human,rule_based `
-  --validation-fraction 0.1 `
-  --test-fraction 0.1 `
-  --split-seed 71
+run_tests.bat
 ```
 
-The export writes Kev's labelled choice schema, one example per line:
-
-```json
-{"state":{"sim_time":0.116,"player":{"lane":1,"speed":20.35},"traffic":[],"legal_actions":["LEFT","STAY","RIGHT","BRAKE"]},"questions":{"next_action":{"type":"choice","instructions":"Choose the safest useful action. Only choose a currently legal option.","criteria":{"LEFT":"Move one lane to the left.","STAY":"Remain in the current lane.","RIGHT":"Move one lane to the right.","BRAKE":"Reduce speed using the brake."},"label":"LEFT"}}}
-```
-
-Raw telemetry, events and episode logs are never modified; the exporter only writes derived files. Alongside the training rows it writes `<name>.provenance.jsonl` with episode id, scenario seed, ticks, label source, approval record and outcome, and `<name>.manifest.json` with the split policy, record counts, action distribution, source distribution and the scenario seeds used by each split. Train, validation and test are grouped by whole scenario seeds, so a repeated seed never appears on both sides. A split needs at least three distinct scenario seeds; with fewer, the export still writes the records and reports the reason instead of silently splitting frames.
-
-Only explicitly approved examples with a valid, legal label are exported, and counts by action, source and episode are always reported. Sources are `human`, `rule_based`, `original_model`, `fine_tuned_model` and `synthetic`; `controller_fallback` decisions are never trainable.
-
-### Fine-tuning
-
-LaneShift does not fine-tune anything itself. Use the official Kev training interface with the exported files, following the current documentation in the Kev repository. The exported rows already match Kev's custom labelled-data format exactly: a JSONL file with one request per line, shaped like an API request plus a `label` on every question. For a `choice` question the label is the option name.
-
-Start from a released checkpoint with `--init_from` so the model keeps what Kev already knows:
+That runs the Python suite and the Godot checks. Individually:
 
 ```powershell
-cd kev
-uv run python -m kev.train --data ..\data\kev_training.train.jsonl --base Qwen/Qwen3.5-4B-Base --init_from jaredpalmer/kev-4b --epochs 2 --lr 2e-5 --batch 1 --accum 8 --dtype bf16 --checkpointing 1 --device cuda --out runs/mine
-```
-
-`--batch 1 --accum 8` in bf16 fits the 0.8B model on a 4 GB GPU. The base must match the checkpoint you start from, and the trainer verifies the base, revision, LoRA rank and head size before loading anything. Use a smaller learning rate than the from-scratch recipe.
-
-Evaluate the result, then serve it:
-
-```powershell
-uv run python -m kev.benchmark --run runs/mine --data ..\data\kev_training.test.jsonl --out runs/mine-eval
-uv run --extra serve python -m kev.serve --run runs/mine --port 8009
-```
-
-The served `run` value is now `runs/mine`. That is the value `expected_run` must contain in the controller registry before the checkpoint may be labelled `fine_tuned_model`:
-
-```json
-{"kev_finetuned": {"base_url": "http://127.0.0.1:8009", "model": "kev-latest", "expected_run": "runs/mine", "label_source": "fine_tuned_model", "timeout": 0.4}}
-```
-
-Use the manifest to keep the validation and test scenarios out of training, and keep 10–20% of the file aside for evaluation as the Kev documentation advises. No fine-tuning has been run in this repository, and no claim about improved gameplay has been made.
-
-## Checks
-
-Run the Windows test launcher with `run_tests.bat`, or run individual checks:
-
-```powershell
-python -m unittest discover -s tests -v  # from the python directory
+cd python; python -m unittest discover -s tests -v
 godot --headless --path . --editor --quit
 godot --headless --path . --script res://tests/simulation_test.gd
 godot --headless --path . --script res://tests/game_flow_test.gd
@@ -305,13 +167,51 @@ godot --headless --path . --script res://tests/network_test.gd
 godot --headless --path . --script res://tests/telemetry_test.gd
 ```
 
-The Godot checks cover deterministic seeds, physical lane versus target lane, the shared legal-action set, terminal snapshot uniqueness, synthetic keyboard input, title/pause/crash/restart/menu flow, command validation, decision-time legality and JSONL persistence including write-failure recovery. The Python tests cover policy provenance, action legality, the Kev request/response contract against a mock HTTP endpoint, decision timeouts, stale-episode cancellation, dataset joins/leakage, Kev-format export, seed-grouped splits and comparison metrics. `experiment_runner.py` provides the live Godot/Python bridge smoke and multi-policy integration check.
+The Godot checks cover seeded reproducibility, physical versus target lane, legal-action generation, terminal snapshot uniqueness, synthetic keyboard input, the title/pause/crash/restart/menu flow, command validation, and telemetry persistence including write-failure recovery. The Python checks cover policy provenance, action legality, the Kev request and response contract against a mock HTTP endpoint, decision timeouts, dataset joins and leakage, the Kev training export, seed-grouped splits, and comparison metrics.
 
-## Known Limitations
+The Python dependencies are in `python/requirements.txt` (`websockets`, `httpx`):
 
-- Rendering is procedural low-poly and intentionally small in scope; this is not a physically realistic motorcycle simulator.
-- Inference runs in the controller process, so each decision waits for one HTTP round trip; a slow model is bounded by `--decision-timeout` and falls back to a safe action.
-- Experiment throughput follows Godot's simulation loop; accelerated execution and GPU model inference are not implemented.
-- The mock Kev service is a test double. Any result produced with it is a bridge test, not a model result.
-- No real Kev checkpoint has been served in this environment, so the live path is verified against a mock HTTP endpoint that reproduces the documented contract.
-- A fine-tuned checkpoint does not exist yet; the `fine_tuned_model` path is unexercised.
+```powershell
+python -m pip install -r python/requirements.txt
+```
+
+## Current limitations
+
+- Real Kev-0.8B CPU inference still needs to be verified on the target environment. The adapter is currently proven only against a mock service.
+- Fine-tuning has not been performed, and the model's effect on gameplay has not been measured.
+- The game is a simple experimental environment, not a realistic traffic simulator. Vehicles move along fixed lanes at constant speeds, and there is no acceleration model for traffic.
+- The compatibility renderer is used by default so the game runs on machines without a GPU. It has no depth fog, so distance haze is approximated with a procedural sky gradient.
+- Steering is discrete: the motorcycle changes lanes on rails rather than being steered continuously.
+
+## Roadmap
+
+1. Verify local Kev inference on the target hardware.
+2. Collect and validate useful training data.
+3. Fine-tune the decision model.
+4. Compare the original and fine-tuned models on held-out scenarios.
+5. Measure gameplay performance and local inference latency.
+
+## Repository layout
+
+```text
+project.godot            Godot project settings
+scenes/main.tscn         Main scene; the world is built procedurally at runtime
+scripts/main.gd          World construction, camera, HUD, input, episode flow
+scripts/sim/simulation.gd Authoritative simulation: state, actions, seeded traffic, collisions
+scripts/net/net_bridge.gd WebSocket client and command validation
+scripts/telemetry/telemetry_logger.gd  Buffered JSONL writer
+python/server.py         Controller server and policy selection
+python/policy.py         Policy interface and decision record
+python/policies/         dummy, rule_based, and the Kev System One adapter
+python/dataset_prep.py   Log validation, candidate building, Kev training export
+python/experiment_runner.py  Seeded policy comparison across scenarios
+python/tools/            Mock Kev service used by the tests
+python/tests/            Python test suite
+tests/                   Godot headless test scripts
+```
+
+## Development and licence
+
+Tools: Godot 4.7.2 Stable, Python 3.10 or newer, and `uv` if you intend to run a local Kev server.
+
+No licence has been chosen for this repository yet. Add one before distributing it.
