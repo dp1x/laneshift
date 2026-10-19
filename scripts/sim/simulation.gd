@@ -27,6 +27,7 @@ var braking: bool = false
 var brake_timer: float = 0.0
 var action_timer: float = 0.0
 var lane_change_cooldown: float = 0.0
+var lane_change_in_progress: bool = false
 var lane_change_speed: float = 6.0
 
 var traffic: Array = []
@@ -74,6 +75,7 @@ func reset(scenario_seed: int, cfg: Dictionary = {}, requested_episode_id: Strin
 	brake_timer = 0.0
 	action_timer = 0.0
 	lane_change_cooldown = 0.0
+	lane_change_in_progress = false
 	traffic.clear()
 	vehicle_id_counter = 0
 	score = 0.0
@@ -150,6 +152,7 @@ func step(delta: float) -> void:
 
 	if abs(player_x - target_x) < 0.05:
 		player_lane = player_target_lane
+		lane_change_in_progress = false
 
 	var dz := player_speed * delta
 	player_z += dz
@@ -220,24 +223,20 @@ func finish_episode(reason: String) -> void:
 	_finalize_episode(reason)
 
 func apply_action(action: String, duration: float = 0.5, source: String = "human") -> bool:
-	if action not in ["LEFT", "STAY", "RIGHT", "BRAKE"]:
-		return false
-	if status != "running":
+	if action not in get_legal_actions():
 		return false
 	var accepted := false
 	match action:
 		"LEFT":
-			if player_lane > 0 and lane_change_cooldown <= 0.0:
-				player_target_lane = player_lane - 1
-				player_lane = player_target_lane
-				lane_change_cooldown = 0.2
-				accepted = true
+			player_target_lane = player_lane - 1
+			lane_change_in_progress = true
+			lane_change_cooldown = 0.2
+			accepted = true
 		"RIGHT":
-			if player_lane < LANE_COUNT - 1 and lane_change_cooldown <= 0.0:
-				player_target_lane = player_lane + 1
-				player_lane = player_target_lane
-				lane_change_cooldown = 0.2
-				accepted = true
+			player_target_lane = player_lane + 1
+			lane_change_in_progress = true
+			lane_change_cooldown = 0.2
+			accepted = true
 		"STAY":
 			accepted = true
 			braking = false
@@ -253,6 +252,18 @@ func apply_action(action: String, duration: float = 0.5, source: String = "human
 		action_timer = max(0.1, duration)
 		control_source = source
 	return accepted
+
+func get_legal_actions() -> Array:
+	if status != "running":
+		return []
+	var legal: Array = []
+	if not lane_change_in_progress and lane_change_cooldown <= 0.0 and player_lane > 0:
+		legal.append("LEFT")
+	legal.append("STAY")
+	if not lane_change_in_progress and lane_change_cooldown <= 0.0 and player_lane < LANE_COUNT - 1:
+		legal.append("RIGHT")
+	legal.append("BRAKE")
+	return legal
 
 func get_snapshot() -> Dictionary:
 	var tlist := []
@@ -278,11 +289,14 @@ func get_snapshot() -> Dictionary:
 			"position": {"x": player_x, "y": 0.0, "z": player_z},
 			"lane": player_lane,
 			"target_lane": player_target_lane,
+			"lane_change_in_progress": lane_change_in_progress,
+			"lane_change_cooldown": lane_change_cooldown,
 			"speed": player_speed,
 			"velocity": {"x": player_velocity_x, "y": 0.0, "z": player_speed},
 			"current_action": current_action,
 			"braking": braking
 		},
+		"legal_actions": get_legal_actions(),
 		"traffic": tlist,
 		"score": score,
 		"distance": distance,

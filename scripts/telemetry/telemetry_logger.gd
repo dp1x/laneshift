@@ -17,9 +17,16 @@ var writer_thread: Thread
 var writer_mutex := Mutex.new()
 var writer_semaphore := Semaphore.new()
 var write_queue: Array = []
+var max_queued_batches: int = 128
+var max_write_attempts: int = 3
 var writer_stopping: bool = false
 var writer_error: String = ""
 var writer_closed: bool = false
+var recovered_batches: int = 0
+var unrecovered_batches: int = 0
+var dropped_records: int = 0
+var recovery_files: Array[String] = []
+var degraded: bool = false
 
 func start_session() -> void:
 	var ts := Time.get_datetime_string_from_system().replace(":", "").replace("-", "").replace("T", "_")
@@ -82,13 +89,19 @@ func flush() -> void:
 		_queue_records("episodes.jsonl", episodes_buffer)
 		episodes_buffer = []
 
-func _queue_records(filename: String, records: Array) -> void:
+func _queue_records(filename: String, records: Array) -> bool:
 	if writer_closed or writer_thread == null or not writer_thread.is_started():
-		return
+		_mark_queue_failure("telemetry writer is not available", records.size())
+		return false
 	writer_mutex.lock()
+	if write_queue.size() >= max_queued_batches:
+		writer_mutex.unlock()
+		_mark_queue_failure("telemetry writer queue capacity reached", records.size())
+		return false
 	write_queue.append({"filename": filename, "records": records.duplicate(true)})
 	writer_mutex.unlock()
 	writer_semaphore.post()
+	return true
 
 func _writer_loop() -> void:
 	while true:
@@ -104,21 +117,76 @@ func _writer_loop() -> void:
 		if should_stop:
 			return
 
-func _write_batch(batch: Dictionary) -> void:
+func _write_batch(batch: Dictionary) -> bool:
 	var path := absolute_session_dir.path_join(String(batch["filename"]))
+	var last_error := "could not open or write log: %s" % path
+	for attempt in range(max_write_attempts):
+		var error_code: int = FileAccess.get_open_error()
+		var file := FileAccess.open(path, FileAccess.READ_WRITE)
+		if file == null:
+			file = FileAccess.open(path, FileAccess.WRITE)
+		if file != null:
+			file.seek_end()
+			for record in batch["records"]:
+				file.store_line(JSON.stringify(record))
+			error_code = file.get_error()
+			file.close()
+			if error_code == OK:
+				return true
+		last_error = "failed to write log: %s (error %s)" % [path, error_string(error_code)]
+		_set_writer_error(last_error)
+		if attempt + 1 < max_write_attempts:
+			OS.delay_msec(50 * (1 << attempt))
+	if _persist_recovery_batch(batch, last_error):
+		writer_mutex.lock()
+		recovered_batches += 1
+		writer_error = "log write recovered to an emergency JSONL file: %s" % recovery_files[-1]
+		writer_mutex.unlock()
+		return true
+	writer_mutex.lock()
+	unrecovered_batches += 1
+	degraded = true
+	writer_error = "log write failed after retries and emergency recovery failed: %s" % last_error
+	writer_mutex.unlock()
+	return false
+
+func _persist_recovery_batch(batch: Dictionary, original_error: String) -> bool:
+	var recovery_dir := ProjectSettings.globalize_path("user://runs/_recovery/%s" % session_id)
+	if DirAccess.make_dir_recursive_absolute(recovery_dir) != OK:
+		return false
+	var filename := String(batch["filename"]).get_basename() + ".jsonl"
+	var path := recovery_dir.path_join(filename)
 	var file := FileAccess.open(path, FileAccess.READ_WRITE)
 	if file == null:
 		file = FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
-		_set_writer_error("could not open log: %s" % path)
-		return
+		return false
 	file.seek_end()
 	for record in batch["records"]:
-		file.store_line(JSON.stringify(record))
+		file.store_line(JSON.stringify({
+			"session_id": session_id,
+			"source_file": batch["filename"],
+			"write_error": original_error,
+			"record": record
+		}))
 	var err := file.get_error()
 	file.close()
 	if err != OK:
-		_set_writer_error("failed while writing log: %s" % path)
+		return false
+	writer_mutex.lock()
+	recovery_files.append(path)
+	writer_mutex.unlock()
+	return true
+
+func _mark_queue_failure(message: String, record_count: int) -> void:
+	writer_mutex.lock()
+	write_failures += 1
+	dropped_records += record_count
+	degraded = true
+	enabled = false
+	writer_error = "%s; dropped %d buffered records and disabled logging" % [message, record_count]
+	writer_mutex.unlock()
+	_report_writer_error()
 
 func _set_writer_error(message: String) -> void:
 	writer_mutex.lock()
@@ -146,6 +214,8 @@ func close() -> void:
 		writer_thread.wait_to_finish()
 	writer_closed = true
 	_report_writer_error()
+	if unrecovered_batches > 0:
+		push_error("LaneShift telemetry ended with %d unrecovered batches (%d dropped records)" % [unrecovered_batches, dropped_records])
 
 func _warn_write_failure(path: String, message: String) -> void:
 	write_failures += 1

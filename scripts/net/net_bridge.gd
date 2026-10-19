@@ -3,9 +3,9 @@ class_name NetBridge
 
 signal connected()
 signal disconnected()
-signal action_received(action: String, duration: float, seq: int, tick: int, episode_id: String, label_source: String)
+signal action_received(action: String, duration: float, seq: int, tick: int, episode_id: String, label_source: String, decision_metadata: Dictionary)
 signal reset_received(seed: int, config: Dictionary, episode_id: String)
-signal command_rejected(seq: int, reason: String, episode_id: String, tick: int)
+signal command_rejected(seq: int, reason: String, episode_id: String, tick: int, decision_metadata: Dictionary)
 
 var url: String = "ws://127.0.0.1:8765"
 var socket: WebSocketPeer = WebSocketPeer.new()
@@ -127,14 +127,18 @@ func _handle_message(text: String) -> void:
 			if not is_finite(dur) or dur <= 0.0 or dur > 5.0:
 				_send_reject("invalid_duration", msg)
 				return
+			var decision_metadata: Variant = msg.get("decision_metadata", {})
+			if typeof(decision_metadata) != TYPE_DICTIONARY:
+				_send_reject("invalid_decision_metadata", msg)
+				return
 			last_seq = max(last_seq, seq)
 			last_tick = max(last_tick, tick)
 			last_action_received_msec = Time.get_ticks_msec()
 			var label_source := String(msg.get("label_source", "external_ai"))
-			if label_source not in ["human", "rule_based", "original_model", "fine_tuned_model", "synthetic", "external_ai"]:
+			if label_source not in ["human", "rule_based", "original_model", "fine_tuned_model", "synthetic", "external_ai", "controller_fallback"]:
 				label_source = "external_ai"
-			emit_signal("action_received", action, dur, seq, tick, ep, label_source)
-			_send({"type": "ack", "protocol_version": 1, "seq": seq, "status": "accepted"})
+			emit_signal("action_received", action, dur, seq, tick, ep, label_source, decision_metadata)
+			_send({"type": "ack", "protocol_version": 1, "seq": seq, "status": "validated"})
 		"reset":
 			if not _valid_reset_message(msg):
 				_send_reject("invalid_reset", msg)
@@ -196,12 +200,13 @@ func _is_integer_number(value: Variant) -> bool:
 func _send(msg: Dictionary) -> void:
 	if connected_flag:
 		outbound_queue.append(msg)
-	else:
-		pass
 
 func _send_reject(reason: String, orig: Dictionary) -> void:
 	var seq := int(orig.get("seq", -1))
 	var ep := String(orig.get("episode_id", ""))
 	var tick := int(orig.get("tick", -1))
-	emit_signal("command_rejected", seq, reason, ep, tick)
+	var metadata: Variant = orig.get("decision_metadata", {})
+	if typeof(metadata) != TYPE_DICTIONARY:
+		metadata = {}
+	emit_signal("command_rejected", seq, reason, ep, tick, metadata)
 	outbound_queue.append({"type": "reject", "protocol_version": 1, "seq": seq, "reason": reason})

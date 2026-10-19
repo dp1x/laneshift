@@ -10,6 +10,9 @@ const DEFAULT_CONFIG := {
 	"base_speed": 20.0,
 	"max_speed": 28.0
 }
+const GROUND_SEGMENT_LENGTH := 2000.0
+const GROUND_SEGMENT_COUNT := 3
+const GROUND_RECYCLE_MARGIN := 250.0
 
 var sim: Simulation
 var telemetry: TelemetryLogger
@@ -20,6 +23,7 @@ var player_node: Node3D
 var traffic_root: Node3D
 var road_root: Node3D
 var tree_root: Node3D
+var ground_segments: Array[MeshInstance3D] = []
 
 var ui_layer: CanvasLayer
 var hud: Control
@@ -66,6 +70,7 @@ var last_external_action_msec: int = 0
 var websocket_port: int = 8765
 var decision_state_history: Dictionary = {}
 var decision_state_history_limit: int = 64
+var last_score_milestone: int = 0
 
 var road_segments: Array = []
 var tree_nodes: Array = []
@@ -144,21 +149,31 @@ func _build_world() -> void:
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	e.ambient_light_color = Color(0.6, 0.65, 0.7)
 	e.ambient_light_energy = 0.4
+	# Distance fog hides the far edge of the recycled ground and gives the road depth.
+	e.fog_enabled = true
+	e.fog_light_color = Color(0.62, 0.75, 0.88)
+	e.fog_light_energy = 1.0
+	e.fog_density = 0.00042
+	e.fog_sky_affect = 0.0
+	e.fog_aerial_perspective = 0.0
 	env.environment = e
 	add_child(env)
 
 	# road root
 	road_root = Node3D.new()
 	add_child(road_root)
-	var ground := MeshInstance3D.new()
-	var ground_mesh := BoxMesh.new()
-	ground_mesh.size = Vector3(400, 0.2, 500)
-	ground.mesh = ground_mesh
 	var ground_material := StandardMaterial3D.new()
 	ground_material.albedo_color = Color(0.12, 0.2, 0.18)
-	ground.material_override = ground_material
-	ground.position = Vector3(0, -0.32, 120)
-	road_root.add_child(ground)
+	for i in range(GROUND_SEGMENT_COUNT):
+		var ground := MeshInstance3D.new()
+		ground.name = "GroundSegment%d" % i
+		var ground_mesh := BoxMesh.new()
+		ground_mesh.size = Vector3(400, 0.2, GROUND_SEGMENT_LENGTH)
+		ground.mesh = ground_mesh
+		ground.material_override = ground_material
+		ground.position = Vector3(0, -0.32, 120.0 + i * GROUND_SEGMENT_LENGTH)
+		road_root.add_child(ground)
+		ground_segments.append(ground)
 	_build_road()
 
 	# trees
@@ -478,8 +493,18 @@ func _build_ui() -> void:
 
 func _make_panel(title: String, buttons: Array) -> Control:
 	var panel := PanelContainer.new()
-	panel.set_anchors_preset(Control.PRESET_CENTER)
-	panel.custom_minimum_size = Vector2(320, 240)
+	var panel_size := Vector2(340, 260)
+	panel.anchor_left = 0.5
+	panel.anchor_right = 0.5
+	panel.anchor_top = 0.5
+	panel.anchor_bottom = 0.5
+	panel.offset_left = -panel_size.x * 0.5
+	panel.offset_right = panel_size.x * 0.5
+	panel.offset_top = -panel_size.y * 0.5
+	panel.offset_bottom = panel_size.y * 0.5
+	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	panel.custom_minimum_size = panel_size
 	var vbox := VBoxContainer.new()
 	panel.add_child(vbox)
 	var t := Label.new()
@@ -556,6 +581,8 @@ func _on_gameover_button(text: String) -> void:
 		go_menu()
 
 func start_game(seed: int = -1, cfg: Dictionary = {}, requested_episode_id: String = "") -> void:
+	var previous_episode_id := sim.episode_id
+	var is_reset := previous_episode_id != "" and sim.status != "idle"
 	if sim.status == "running":
 		sim.finish_episode("reset")
 	if seed < 0:
@@ -565,6 +592,7 @@ func start_game(seed: int = -1, cfg: Dictionary = {}, requested_episode_id: Stri
 		active_config[key] = cfg[key]
 	sim.reset(seed, active_config, requested_episode_id)
 	action_event_sequence = 0
+	last_score_milestone = 0
 	decision_state_history.clear()
 	last_external_action_msec = Time.get_ticks_msec()
 	set_meta("prev_left", false)
@@ -580,6 +608,8 @@ func start_game(seed: int = -1, cfg: Dictionary = {}, requested_episode_id: Stri
 		control_mode = "external"
 	sim.control_source = "external_ai" if external_control else "human"
 	net.set_episode_id(sim.episode_id)
+	if is_reset:
+		_log_event("episode_reset", {"previous_episode_id": previous_episode_id, "new_episode_id": sim.episode_id, "scenario_seed": seed})
 	_log_event("episode_start", {"scenario_seed": seed, "config": active_config})
 	menu_panel.visible = false
 	pause_panel.visible = false
@@ -614,7 +644,15 @@ func _on_vehicle_overtaken(vehicle_id: String) -> void:
 	_log_event("vehicle_overtaken", {"vehicle_id": vehicle_id, "score": sim.score})
 
 func _on_episode_ended(summary: Dictionary) -> void:
-	_log_event("episode_end", summary)
+	var terminal_state: Dictionary = sim.get_snapshot()
+	terminal_state["state_id"] = "%s:%d:terminal" % [sim.episode_id, sim.physics_tick]
+	terminal_state["snapshot_kind"] = "terminal"
+	terminal_state["wall_time_unix"] = Time.get_unix_time_from_system()
+	terminal_state["wall_time_monotonic_msec"] = Time.get_ticks_msec()
+	telemetry.log_telemetry(terminal_state)
+	var end_event := summary.duplicate(true)
+	end_event["terminal_state_id"] = terminal_state["state_id"]
+	_log_event("episode_end", end_event)
 	telemetry.log_episode(summary)
 	print("LANESHIFT_EPISODE " + JSON.stringify(summary))
 	if summary.get("score", 0.0) > best_score:
@@ -631,28 +669,60 @@ func _on_scenario_init(info: Dictionary) -> void:
 	if telemetry != null:
 		_log_event("scenario_initialized", info)
 
-func _on_net_action(action: String, duration: float, seq: int, tick: int, episode_id: String, label_source: String) -> void:
+func _on_net_action(action: String, duration: float, seq: int, tick: int, episode_id: String, label_source: String, decision_metadata: Dictionary) -> void:
+	var observed_state: Dictionary = _get_decision_state(tick)
+	_log_event("external_action_received", {
+		"controller_seq": seq,
+		"command_episode_id": episode_id,
+		"command_tick": tick,
+		"decision_state_id": observed_state.get("state_id", ""),
+		"requested_action": action,
+		"requested_duration": duration,
+		"label_source": label_source,
+		"decision_metadata": decision_metadata
+	})
 	if state != "playing":
-		_log_event("external_action_ignored", {"controller_seq": seq, "requested_action": action, "reason": "episode_not_playing"})
+		_log_event("external_action_ignored", {"controller_seq": seq, "requested_action": action, "reason": "episode_not_playing", "decision_metadata": decision_metadata})
 		return
 	if (external_control or auto_run) and episode_id == sim.episode_id:
-		var decision_state: Dictionary = _get_decision_state(tick)
+		var decision_state: Dictionary = observed_state
 		if decision_state.is_empty():
 			_log_event("external_action_rejected", {
 				"controller_seq": seq,
 				"requested_action": action,
 				"command_tick": tick,
+				"decision_metadata": decision_metadata,
 				"reason": "decision_state_unavailable"
 			})
 			return
-		var actual_source := label_source if label_source in ["rule_based", "original_model", "fine_tuned_model"] else "external_ai"
+		if action not in decision_state.get("legal_actions", []):
+			_log_event("external_action_rejected", {
+				"controller_seq": seq,
+				"requested_action": action,
+				"command_tick": tick,
+				"decision_state_id": decision_state.get("state_id", ""),
+				"label_source": label_source,
+				"decision_metadata": decision_metadata,
+				"reason": "action_not_legal_in_decision_state"
+			})
+			return
+		var actual_source := label_source if label_source in ["rule_based", "original_model", "fine_tuned_model", "controller_fallback"] else "external_ai"
 		last_external_action_msec = Time.get_ticks_msec()
-		_submit_action(action, duration, actual_source, label_source, seq, tick, decision_state)
+		var applied: bool = _submit_action(action, duration, actual_source, label_source, seq, tick, decision_state, decision_metadata)
+		_log_event("external_action_applied" if applied else "external_action_rejected", {
+			"controller_seq": seq,
+			"requested_action": action,
+			"requested_duration": duration,
+			"applied_action": action if applied else sim.current_action,
+			"accepted": applied,
+			"decision_metadata": decision_metadata,
+			"reason": "" if applied else "not_legal_at_application"
+		})
 	else:
-		_log_event("external_action_ignored", {"controller_seq": seq, "requested_action": action, "reason": "human_control_active"})
+		_log_event("external_action_ignored", {"controller_seq": seq, "requested_action": action, "reason": "human_control_active", "decision_metadata": decision_metadata})
 
-func _on_command_rejected(seq: int, reason: String, episode_id: String, tick: int) -> void:
-	_log_event("external_action_rejected", {"controller_seq": seq, "reason": reason, "command_episode_id": episode_id, "command_tick": tick})
+func _on_command_rejected(seq: int, reason: String, episode_id: String, tick: int, decision_metadata: Dictionary) -> void:
+	_log_event("external_action_rejected", {"controller_seq": seq, "reason": reason, "command_episode_id": episode_id, "command_tick": tick, "decision_metadata": decision_metadata})
 
 func _on_net_reset(seed: int, cfg: Dictionary, episode_id: String) -> void:
 	external_control = true
@@ -670,7 +740,7 @@ func _on_net_disconnected() -> void:
 		control_mode = "human"
 	_log_event("controller_disconnected", {})
 
-func _submit_action(action: String, duration: float, control_source: String, label_source: String, controller_seq: int = -1, state_tick: int = -1, decision_state: Dictionary = {}) -> bool:
+func _submit_action(action: String, duration: float, control_source: String, label_source: String, controller_seq: int = -1, state_tick: int = -1, decision_state: Dictionary = {}, decision_metadata: Dictionary = {}) -> bool:
 	var application_state: Dictionary = sim.get_snapshot()
 	var state_before: Dictionary = decision_state.duplicate(true) if not decision_state.is_empty() else application_state
 	var decision_tick := int(state_before.get("physics_tick", state_tick if state_tick >= 0 else sim.physics_tick))
@@ -692,13 +762,22 @@ func _submit_action(action: String, duration: float, control_source: String, lab
 		"application_sim_time": application_state.get("sim_time", sim.sim_time),
 		"controller_state_tick": state_tick if state_tick >= 0 else decision_tick,
 		"requested_action": action,
+		"requested_duration": duration,
 		"applied_action": applied_action,
+		"applied_duration": sim.action_timer if accepted else 0.0,
 		"accepted": accepted,
 		"control_source": control_source,
 		"label_source": label_source,
+		"decision_metadata": decision_metadata,
 		"state_before": state_before
 	})
 	return accepted
+
+func _log_score_milestones(current_score: float) -> void:
+	var reached_milestone := int(floor(current_score / 100.0)) * 100
+	while reached_milestone > last_score_milestone:
+		last_score_milestone += 100
+		_log_event("score_milestone", {"milestone": last_score_milestone, "score": current_score})
 
 func _remember_decision_state(snapshot: Dictionary) -> void:
 	var tick := int(snapshot.get("physics_tick", -1))
@@ -751,8 +830,12 @@ func _physics_process(delta: float) -> void:
 			_log_event("controller_timeout", {"fallback_control": "human"})
 			_submit_action("STAY", 0.1, "human", "human")
 		sim.step(delta)
+		_log_score_milestones(sim.score)
 		_sync_traffic_nodes()
 		_update_camera(false)
+		if sim.status != "running":
+			_update_hud()
+			return
 		# telemetry
 		telemetry_timer += delta
 		if telemetry_timer >= 1.0 / telemetry_hz:
@@ -847,6 +930,7 @@ func _key_just_pressed(key: int) -> bool:
 func pause_game() -> void:
 	if state != "playing":
 		return
+	_log_event("pause", {})
 	state = "paused"
 	get_tree().paused = true
 	pause_panel.visible = true
@@ -854,6 +938,7 @@ func pause_game() -> void:
 func resume_game() -> void:
 	if state != "paused":
 		return
+	_log_event("resume", {})
 	state = "playing"
 	get_tree().paused = false
 	pause_panel.visible = false
@@ -894,6 +979,12 @@ func _sync_traffic_nodes() -> void:
 	# recycle road
 	_recycle_road()
 	_recycle_trees()
+	_recycle_ground()
+
+func _recycle_ground() -> void:
+	for ground in ground_segments:
+		while ground.position.z + GROUND_SEGMENT_LENGTH * 0.5 < sim.player_z - GROUND_RECYCLE_MARGIN:
+			ground.position.z += GROUND_SEGMENT_LENGTH * GROUND_SEGMENT_COUNT
 
 func _recycle_road() -> void:
 	for seg in road_segments:

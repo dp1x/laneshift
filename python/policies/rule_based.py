@@ -8,7 +8,7 @@ class RuleBasedPolicy(BasePolicy):
     def choose_action(self, state):
         player = state.get("player", {})
         lane = player.get("lane", 1)
-        speed = player.get("speed", 20.0)
+        legal = state.get("legal_actions", ["LEFT", "STAY", "RIGHT", "BRAKE"])
         traffic = state.get("traffic", [])
         # find nearest vehicle ahead in same lane
         nearest = None
@@ -25,12 +25,12 @@ class RuleBasedPolicy(BasePolicy):
                 # try change lane to side with more room
                 left_gap = self._lane_gap(traffic, lane - 1, player)
                 right_gap = self._lane_gap(traffic, lane + 1, player)
-                if lane > 0 and left_gap >= right_gap and left_gap > gap:
+                if "LEFT" in legal and lane > 0 and left_gap >= right_gap and left_gap > gap:
                     return "LEFT"
-                if lane < 2 and right_gap > gap:
+                if "RIGHT" in legal and lane < 2 and right_gap > gap:
                     return "RIGHT"
-                return "BRAKE"
-        return "STAY"
+                return "BRAKE" if "BRAKE" in legal else self.legal_fallback(state)
+        return self.legal_fallback(state)
 
     def _lane_gap(self, traffic, lane, player):
         if lane < 0 or lane > 2:

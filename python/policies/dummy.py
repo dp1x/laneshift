@@ -10,10 +10,13 @@ class DummyPolicy(BasePolicy):
 
     def choose_action(self, state):
         self._counter += 1
+        legal = state.get("legal_actions", ["LEFT", "STAY", "RIGHT", "BRAKE"])
         # Make the first command visibly exercise the bridge, then return to center.
         if self._counter == 1:
-            return "LEFT"
-        if self._counter % 20 == 0:
+            action = "LEFT"
+        elif self._counter % 20 == 0:
             lane = state.get("player", {}).get("lane", 1)
-            return "RIGHT" if lane == 0 else "LEFT"
-        return "STAY"
+            action = "RIGHT" if lane == 0 else "LEFT"
+        else:
+            action = "STAY"
+        return action if action in legal else self.legal_fallback(state)
