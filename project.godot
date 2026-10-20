@@ -8,9 +8,15 @@ config/features=PackedStringArray("4.7", "Forward Plus")
 config/icon="res://icon.svg"
 
 [display]
-window/size/viewport_width=960
-window/size/viewport_height=540
+window/size/viewport_width=800
+window/size/viewport_height=450
 window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
+; The app is DPI-unaware, so Windows shrinks the requested window by the
+; display scale (150% here) while leaving the framebuffer at viewport size.
+; Requesting 1.5x the canvas makes the physical window match it exactly.
+window/size/window_width_override=1200
+window/size/window_height_override=675
 
 [physics]
 common/physics_ticks_per_second=60

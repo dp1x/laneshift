@@ -84,6 +84,15 @@ python python/server.py --policy kev_original --kev-config kev_models.example.js
 
 `expected_run` must match the `run` value that `GET /v1/models` reports for the checkpoint that is actually loaded. The controller refuses to label a run as a model if it does not, so a swapped or missing checkpoint fails at startup instead of producing fake model data. `kev_models.example.json` is a template; copy it and adjust the values for your own setup. Never commit API keys; the controller reads `KEV_API_KEY` from the environment.
 
+### Status of model integration
+
+| State | Status |
+| --- | --- |
+| Local CPU inference with the real checkpoint | **Verified.** `jaredpalmer/kev-0.8b@v1.0` served locally on CPU and driving a real game episode. |
+| Local CPU inference for a *fine-tuned* checkpoint | **Not done.** No fine-tuned checkpoint exists yet. |
+| Mock adapter test only | The mock service in `python/tools/` is used by the test suite. It runs no model. |
+| Fine-tuning | **Not performed.** No claim of improved gameplay has been made. |
+
 ### Verified on this machine
 
 Kev-0.8B was served locally on CPU on a Snapdragon X Elite (Windows on ARM64) and drove a real game episode:
@@ -156,25 +165,42 @@ A real snapshot, trimmed to the interesting fields:
 }
 ```
 
-A real action event, from a run driven by the Kev adapter against the mock service:
+A real action event, from a run driven by the released Kev-0.8B checkpoint:
 
 ```json
 {
-  "event_id": "ep_5150_1:action:1",
+  "event_id": "ep_303_1:action:1",
   "decision_seq": 1,
   "controller_seq": 1,
   "decision_tick": 7,
-  "application_tick": 7,
-  "state_id": "ep_5150_1:7",
-  "requested_action": "LEFT",
-  "applied_action": "LEFT",
+  "application_tick": 765,
+  "application_latency_ticks": 758,
+  "requested_action": "STAY",
+  "applied_action": "STAY",
   "accepted": true,
   "control_source": "original_model",
-  "label_source": "original_model"
+  "label_source": "original_model",
+  "state_id": "ep_303_1:7"
+}
+```
+
+Its `decision_metadata` records which checkpoint answered, what it answered and how long it took:
+
+```json
+{
+  "model_id": "jaredpalmer/kev-0.8b@v1.0",
+  "model_alias": "kev-latest",
+  "probabilities": {"BRAKE": 0.2392, "LEFT": 0.1637, "RIGHT": 0.1657, "STAY": 0.4315},
+  "confidence": 0.242,
+  "model_latency_ms": 12622.6,
+  "client_latency_ms": 12629.96,
+  "request_id": "19f1892287c24cc7bf7b0de0ee97b367"
 }
 ```
 
 `decision_tick` is the tick the controller saw; `application_tick` is the tick the action was applied. They differ when a decision takes time to arrive, which is the normal case with a model in the loop.
+
+A mock service must never appear in this trail as a model decision. The mock in `python/tools/` is a test double: it answers the documented HTTP contract but runs no model, so a decision it produces carries no `model_id` of a real checkpoint and must not be labelled `original_model` or `fine_tuned_model`. The controller enforces this by verifying the served checkpoint's identity against `expected_run` before it will label anything as a model.
 
 ### Coordinates and units
 
@@ -231,11 +257,11 @@ python -m pip install -r python/requirements.txt
 
 ## Roadmap
 
-1. Verify local Kev inference on the target hardware.
-2. Collect and validate useful training data.
-3. Fine-tune the decision model.
-4. Compare the original and fine-tuned models on held-out scenarios.
-5. Measure gameplay performance and local inference latency.
+1. Collect and validate useful training data.
+2. Fine-tune the decision model.
+3. Compare the original and fine-tuned models on held-out scenarios.
+4. Measure gameplay performance and local inference latency.
+5. Make CPU inference fast enough to steer in real time, or move it off this machine.
 
 ## Repository layout
 
@@ -253,7 +279,7 @@ python/kev_state.py      The one state projection shared by inference and traini
 python/policies/         dummy, rule_based, and the Kev System One adapter
 python/dataset_prep.py   Log validation, candidate building, Kev training export
 python/experiment_runner.py  Seeded policy comparison across scenarios
-python/tools/            Mock Kev service used by the tests
+python/tools/            Mock Kev service used by the tests (not a model)
 python/tests/            Python test suite
 tests/                   Godot headless test scripts
 ```
