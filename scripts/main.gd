@@ -1,11 +1,11 @@
 extends Node3D
 
 const DEFAULT_CONFIG := {
-	"traffic_density": 1.0,
-	"traffic_speed_min": 8.0,
-	"traffic_speed_max": 16.0,
-	"spawn_interval_min": 22.0,
-	"spawn_interval_max": 38.0,
+	"traffic_density": 0.7,
+	"traffic_speed_min": 13.0,
+	"traffic_speed_max": 21.0,
+	"spawn_interval_min": 55.0,
+	"spawn_interval_max": 95.0,
 	"episode_duration": 0.0,
 	"base_speed": 20.0,
 	"max_speed": 28.0
@@ -360,64 +360,109 @@ func _create_tree() -> Node3D:
 	_add_blob_shadow(t, Vector2(3.4, 3.4), Vector3(0.7, 0, 0.4))
 	return t
 
+func _make_box(parent: Node3D, size: Vector3, color: Color, position: Vector3, rotation_deg: Vector3 = Vector3.ZERO) -> MeshInstance3D:
+	var node := MeshInstance3D.new()
+	var mesh := BoxMesh.new()
+	mesh.size = size
+	node.mesh = mesh
+	var material := StandardMaterial3D.new()
+	material.albedo_color = color
+	node.material_override = material
+	node.position = position
+	node.rotation_degrees = rotation_deg
+	parent.add_child(node)
+	return node
+
 func _create_motorcycle() -> Node3D:
 	var root := Node3D.new()
-	# body
-	var body := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = Vector3(0.7, 0.4, 1.6)
-	body.mesh = bm
-	var bmat := StandardMaterial3D.new()
-	bmat.albedo_color = Color(0.1, 0.6, 0.9)
-	body.material_override = bmat
-	body.position.y = 0.6
-	root.add_child(body)
-	# wheels
-	for wz in [-0.6, 0.6]:
-		var w := MeshInstance3D.new()
+	var paint := Color(0.09, 0.42, 0.72)
+	var dark := Color(0.09, 0.10, 0.12)
+	var metal := Color(0.62, 0.65, 0.68)
+
+	# wheels: front wheel slightly larger and further forward
+	for wz in [-0.72, 0.78]:
+		var wheel := MeshInstance3D.new()
 		var wm := CylinderMesh.new()
-		wm.top_radius = 0.35
-		wm.bottom_radius = 0.35
-		wm.height = 0.2
-		w.mesh = wm
-		w.rotation_degrees = Vector3(0, 0, 90)
-		w.position = Vector3(0, 0.35, wz)
+		wm.top_radius = 0.36
+		wm.bottom_radius = 0.36
+		wm.height = 0.18
+		wm.radial_segments = 12
+		wm.rings = 1
+		wheel.mesh = wm
 		var wmat := StandardMaterial3D.new()
-		wmat.albedo_color = Color(0.05, 0.05, 0.05)
-		w.material_override = wmat
-		root.add_child(w)
-	# rider
+		wmat.albedo_color = dark
+		wheel.material_override = wmat
+		wheel.rotation_degrees = Vector3(0, 0, 90)
+		wheel.position = Vector3(0, 0.36, wz)
+		root.add_child(wheel)
+		# hub
+		_make_box(root, Vector3(0.2, 0.1, 0.1), metal, Vector3(0, 0.36, wz))
+
+	# engine and frame block, tapering toward the tank
+	_make_box(root, Vector3(0.42, 0.42, 1.0), dark, Vector3(0, 0.52, -0.05))
+	_make_box(root, Vector3(0.5, 0.34, 0.62), paint, Vector3(0, 0.72, 0.18))
+	# fuel tank
+	_make_box(root, Vector3(0.44, 0.28, 0.7), paint, Vector3(0, 0.92, 0.18), Vector3(-6, 0, 0))
+	# seat
+	_make_box(root, Vector3(0.36, 0.12, 0.66), dark, Vector3(0, 0.98, -0.34), Vector3(3, 0, 0))
+	# tail
+	_make_box(root, Vector3(0.3, 0.22, 0.3), paint, Vector3(0, 0.96, -0.72), Vector3(12, 0, 0))
+	# front fairing
+	_make_box(root, Vector3(0.36, 0.52, 0.28), paint, Vector3(0, 0.92, 0.66), Vector3(-24, 0, 0))
+	# forks
+	for side in [-1, 1]:
+		_make_box(root, Vector3(0.07, 0.62, 0.07), metal, Vector3(side * 0.13, 0.62, 0.72), Vector3(-20, 0, 0))
+	# handlebars
+	_make_box(root, Vector3(0.66, 0.07, 0.07), metal, Vector3(0, 1.16, 0.56))
+	# exhaust
+	_make_box(root, Vector3(0.12, 0.12, 0.8), metal, Vector3(0.2, 0.38, -0.3), Vector3(0, 0, 0))
+
+	# rider: torso leaning forward over the tank
 	var rider := MeshInstance3D.new()
 	var rm := CapsuleMesh.new()
-	rm.radius = 0.3
-	rm.height = 1.0
+	rm.radius = 0.24
+	rm.height = 0.86
+	rm.radial_segments = 8
+	rm.rings = 2
 	rider.mesh = rm
 	var rmat := StandardMaterial3D.new()
-	rmat.albedo_color = Color(0.9, 0.3, 0.2)
+	rmat.albedo_color = Color(0.78, 0.22, 0.18)
 	rider.material_override = rmat
-	rider.position = Vector3(0, 1.3, 0)
+	rider.position = Vector3(0, 1.32, -0.02)
+	rider.rotation_degrees = Vector3(-38, 0, 0)
 	root.add_child(rider)
-	# head
+	# arms reaching the bars
+	for side in [-1, 1]:
+		_make_box(root, Vector3(0.12, 0.12, 0.62), rmat.albedo_color, Vector3(side * 0.2, 1.24, 0.3), Vector3(-26, 0, 0))
+	# legs
+	for side in [-1, 1]:
+		_make_box(root, Vector3(0.16, 0.16, 0.5), dark, Vector3(side * 0.16, 0.78, -0.18), Vector3(24, 0, 0))
+	# helmet with a dark visor
 	var head := MeshInstance3D.new()
 	var hm := SphereMesh.new()
-	hm.radius = 0.22
+	hm.radius = 0.21
+	hm.height = 0.42
+	hm.radial_segments = 10
+	hm.rings = 5
 	head.mesh = hm
 	var hmat := StandardMaterial3D.new()
-	hmat.albedo_color = Color(0.95, 0.85, 0.7)
+	hmat.albedo_color = Color(0.95, 0.93, 0.88)
 	head.material_override = hmat
-	head.position = Vector3(0, 1.9, 0)
+	head.position = Vector3(0, 1.62, 0.2)
 	root.add_child(head)
-	_add_blob_shadow(root, Vector2(1.3, 2.0))
+	_make_box(root, Vector3(0.34, 0.12, 0.06), Color(0.06, 0.07, 0.09), Vector3(0, 1.62, 0.38))
+
+	_add_blob_shadow(root, Vector2(1.1, 2.2))
 	tail_light = MeshInstance3D.new()
 	var light_mesh := BoxMesh.new()
-	light_mesh.size = Vector3(0.28, 0.16, 0.08)
+	light_mesh.size = Vector3(0.26, 0.12, 0.06)
 	tail_light.mesh = light_mesh
 	var light_material := StandardMaterial3D.new()
 	light_material.albedo_color = Color(0.85, 0.08, 0.05)
 	light_material.emission_enabled = true
 	light_material.emission = Color(0.7, 0.02, 0.01)
 	tail_light.material_override = light_material
-	tail_light.position = Vector3(0, 0.72, -0.84)
+	tail_light.position = Vector3(0, 0.99, -0.87)
 	root.add_child(tail_light)
 	return root
 
