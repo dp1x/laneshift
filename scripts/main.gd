@@ -1,5 +1,8 @@
 extends Node3D
 
+const PortablePathsScriptScript = preload("res://scripts/portable/portable_paths.gd")
+const PortablePathsScript = PortablePathsScriptScript
+
 const DEFAULT_CONFIG := {
 	"traffic_density": 0.7,
 	"traffic_speed_min": 13.0,
@@ -47,12 +50,14 @@ var status_label: Label
 var conn_label: Label
 var msg_label: Label
 var gameover_result_label: Label
+var record_button: Button
+var record_status_label: Label
 var notice_label: Label
 var tail_light: MeshInstance3D
 var notice_timer: float = 0.0
 
 var best_score: float = 0.0
-var highscore_path := "user://highscore.save"
+var highscore_path: String = ""
 
 var telemetry_timer: float = 0.0
 var telemetry_hz: float = 30.0
@@ -87,9 +92,17 @@ var hill_nodes: Array = []
 var cloud_nodes: Array = []
 var traffic_nodes: Dictionary = {}
 
+var build_commit: String = "dev"
+var build_godot_version: String = ""
 var shake_timer: float = 0.0
 var shake_intensity: float = 0.0
 
+var recording_active: bool = false
+var recording_session_id: String = ""
+var recording_start_msec: int = 0
+var recorded_event_count: int = 0
+var recorded_sample_count: int = 0
+var recorded_episode_count: int = 0
 var brake_held: bool = false
 
 var rng_visual: RandomNumberGenerator = RandomNumberGenerator.new()
@@ -97,6 +110,8 @@ var rng_visual: RandomNumberGenerator = RandomNumberGenerator.new()
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	rng_visual.randomize()
+	PortablePathsScript.ensure_dir(PortablePathsScript.get_config_root())
+	highscore_path = PortablePathsScript.get_config_root().path_join("highscore.save")
 	_load_highscore()
 	_parse_args()
 	sim = Simulation.new()
@@ -110,7 +125,6 @@ func _ready() -> void:
 	_build_ui()
 	telemetry = TelemetryLogger.new()
 	add_child(telemetry)
-	telemetry.start_session()
 	net = NetBridge.new()
 	net.url = "ws://127.0.0.1:%d" % websocket_port
 	net.max_stale_ticks = max_stale_ticks
@@ -270,20 +284,16 @@ func _build_road() -> void:
 ## markings are painted into a repeating texture rather than modelled, which
 ## keeps long stretches of road cheap to draw.
 func _create_road_segment() -> Node3D:
-	var seg := Node3D.new()
+	var seg := MeshInstance3D.new()
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(ROAD_WIDTH, 0.2, ROAD_SEGMENT_LENGTH)
-	var mi := MeshInstance3D.new()
-	mi.mesh = mesh
+	seg.mesh = mesh
 	var mat := StandardMaterial3D.new()
-	# The texture already carries the surface colour, so the albedo stays white
-	# instead of darkening it a second time.
 	mat.albedo_color = Color(1, 1, 1)
 	mat.albedo_texture = _road_texture()
 	mat.uv1_scale = Vector3(1.0, ROAD_SEGMENT_LENGTH / ROAD_TILE_LENGTH, 1.0)
-	mi.material_override = mat
-	mi.position.y = -0.1
-	seg.add_child(mi)
+	seg.material_override = mat
+	seg.position.y = -0.1
 
 	# guard rails along both edges
 	for side in [-1, 1]:
@@ -299,7 +309,7 @@ func _create_road_segment() -> Node3D:
 		rail.position = Vector3(side * 6.35, 0.55, 0)
 		seg.add_child(rail)
 		# posts
-		for i in range(ROAD_SEGMENT_LENGTH / 12.5):
+		for i in range(int(ROAD_SEGMENT_LENGTH / 12.5)):
 			var post := MeshInstance3D.new()
 			var post_mesh := BoxMesh.new()
 			post_mesh.size = Vector3(0.1, 0.9, 0.1)
@@ -688,6 +698,15 @@ func _build_ui() -> void:
 	best_label = Label.new()
 	best_label.text = "Best: 0"
 	top.add_child(best_label)
+
+	record_button = Button.new()
+	record_button.text = "Record"
+	record_button.custom_minimum_size = Vector2(90, 32)
+	record_button.pressed.connect(_on_record_button_pressed)
+	top.add_child(record_button)
+	record_status_label = Label.new()
+	record_status_label.text = ""
+	top.add_child(record_status_label)
 
 	status_label = Label.new()
 	status_label.text = ""
@@ -1091,14 +1110,16 @@ func _physics_process(delta: float) -> void:
 		if sim.status != "running":
 			_update_hud()
 			return
-		# telemetry
-		telemetry_timer += delta
-		if telemetry_timer >= 1.0 / telemetry_hz:
-			telemetry_timer = 0.0
-			var snap: Dictionary = sim.get_snapshot()
-			snap["wall_time_unix"] = Time.get_unix_time_from_system()
-			snap["wall_time_monotonic_msec"] = Time.get_ticks_msec()
-			telemetry.log_telemetry(snap)
+		# telemetry (only while recording)
+		if recording_active:
+			telemetry_timer += delta
+			if telemetry_timer >= 1.0 / telemetry_hz:
+				telemetry_timer = 0.0
+				var snap: Dictionary = sim.get_snapshot()
+				snap["wall_time_unix"] = Time.get_unix_time_from_system()
+				snap["wall_time_monotonic_msec"] = Time.get_ticks_msec()
+				if telemetry != null:
+					telemetry.log_telemetry(snap)
 		# decision/net send
 		decision_timer += delta
 		if decision_timer >= 1.0 / decision_hz:
@@ -1143,6 +1164,8 @@ func _input(event: InputEvent) -> void:
 				_submit_action("RIGHT", 0.2, "human", "human")
 
 func _process(delta: float) -> void:
+	if _key_just_pressed(KEY_F9):
+		_toggle_recording()
 	# pause toggle
 	if Input.is_action_just_pressed("ui_cancel"):
 		if state == "playing":
@@ -1166,6 +1189,15 @@ func _process(delta: float) -> void:
 	# net poll already in NetBridge._process
 	# update conn label occasionally
 	conn_label.text = "WS: " + ("connected" if net.connected_flag else "disconnected")
+	_update_record_ui()
+	if recording_active and record_status_label != null:
+		var elapsed := float(Time.get_ticks_msec() - recording_start_msec) / 1000.0
+		var samples := 0
+		var events := 0
+		if telemetry != null:
+			samples = telemetry.telemetry_record_count
+			events = telemetry.event_record_count
+		record_status_label.text = "REC %.1fs  samples:%d events:%d" % [elapsed, samples, events]
 	if state == "menu":
 		menu_panel.visible = true
 
@@ -1285,6 +1317,100 @@ func _update_camera(force: bool) -> void:
 	var target_fov := 60.0 + speed_ratio * 9.0
 	camera.fov = lerpf(camera.fov, target_fov, 0.06 if not force else 1.0)
 
+func _toggle_recording() -> void:
+	if recording_active:
+		stop_recording()
+	else:
+		start_recording()
+
+func start_recording() -> void:
+	if recording_active:
+		return
+	var root := PortablePathsScript.get_portable_root()
+	if not PortablePathsScript.is_writable(root):
+		_show_notice("Recording failed: portable root is not writable. Extract to a writable folder.")
+		return
+	PortablePathsScript.ensure_dir(PortablePathsScript.get_recordings_root())
+	_read_build_info()
+	if telemetry == null or (telemetry != null and telemetry.writer_closed):
+		telemetry = TelemetryLogger.new()
+		add_child(telemetry)
+	telemetry.build_commit = build_commit
+	telemetry.build_godot_version = build_godot_version
+	telemetry.start_session(PortablePathsScript.get_recordings_root())
+	recording_active = true
+	recording_session_id = telemetry.session_id
+	recording_start_msec = Time.get_ticks_msec()
+	_create_recording_lock()
+	_log_event("recording_started", {"session_id": recording_session_id})
+	_update_record_ui()
+
+func stop_recording() -> void:
+	if not recording_active:
+		return
+	_log_event("recording_stopped", {"session_id": recording_session_id})
+	if telemetry != null:
+		telemetry.close()
+	recording_active = false
+	_remove_recording_lock()
+	var rel_path := ""
+	if telemetry != null:
+		rel_path = telemetry.session_dir
+	_show_notice("Recording saved to " + rel_path)
+	_update_record_ui()
+
+func _create_recording_lock() -> void:
+	PortablePathsScript.ensure_dir(PortablePathsScript.get_recordings_root())
+	var f := FileAccess.open(PortablePathsScript.get_recordings_root().path_join(".recording_active"), FileAccess.WRITE)
+	if f:
+		f.store_string(recording_session_id)
+		f.close()
+
+func _remove_recording_lock() -> void:
+	DirAccess.remove_absolute(PortablePathsScript.get_recordings_root().path_join(".recording_active"))
+
+func _read_build_info() -> void:
+	build_commit = "dev"
+	build_godot_version = "%d.%d.%d" % [Engine.get_version_info()["major"], Engine.get_version_info()["minor"], Engine.get_version_info()["patch"]]
+	var root := PortablePathsScript.get_portable_root()
+	var candidates := [root.path_join("BUILD-INFO.txt"), "res://BUILD-INFO.txt"]
+	for path in candidates:
+		if FileAccess.file_exists(path):
+			var f := FileAccess.open(path, FileAccess.READ)
+			if f:
+				while not f.eof_reached():
+					var line := f.get_line().strip_edges()
+					if line == "" or line.begins_with("#"):
+						continue
+					var parts := line.split("=", true, 1)
+					if parts.size() == 2:
+						var key := parts[0].strip_edges()
+						var val := parts[1].strip_edges()
+						if key == "commit" or key == "git_commit" or key == "commit_sha":
+							build_commit = val
+						elif key == "godot_version" or key == "engine_version":
+							build_godot_version = val
+				f.close()
+			return
+
+func _show_notice(text: String) -> void:
+	notice_label.text = text
+	notice_label.visible = true
+	notice_timer = 3.0
+
+func _on_record_button_pressed() -> void:
+	_toggle_recording()
+
+func _update_record_ui() -> void:
+	if record_button == null:
+		return
+	if recording_active:
+		record_button.text = "Stop"
+		record_status_label.text = "REC"
+	else:
+		record_button.text = "Record"
+		record_status_label.text = ""
+
 func _update_hud() -> void:
 	score_label.text = "Score: %.0f" % sim.score
 	dist_label.text = "Dist: %.0f m" % sim.distance
@@ -1307,6 +1433,7 @@ func _save_highscore() -> void:
 func _start_auto_run() -> void:
 	auto_running = true
 	auto_episode_index = 0
+	start_recording()
 	auto_total_episodes = auto_seeds.size() * auto_episodes_per_seed
 	if auto_max_episodes > 0:
 		auto_total_episodes = min(auto_total_episodes, auto_max_episodes)

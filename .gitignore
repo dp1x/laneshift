@@ -19,4 +19,9 @@ comparison.csv
 *.metrics.json
 CHECKPOINT.md
 BLUEPRINT.md
-temp/
+.portable-dev/
+recordings/
+transfer/
+logs/
+config/
+*.zip

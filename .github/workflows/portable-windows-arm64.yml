@@ -1,0 +1,111 @@
+name: Portable Windows ARM64
+
+on:
+  push:
+    branches: [main, feature/*]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: python -m pip install -r python/requirements.txt
+
+      - name: Run Python tests
+        run: |
+          cd python
+          python -m unittest discover -s tests -v
+
+      - name: Download Godot editor
+        shell: pwsh
+        run: |
+          $version = "4.7.2"
+          $url = "https://github.com/godotengine/godot/releases/download/$version-stable/Godot_v${version}-stable_win64.exe.zip"
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\godot-editor.zip"
+          Expand-Archive -Path "$env:RUNNER_TEMP\godot-editor.zip" -DestinationPath "$env:RUNNER_TEMP\godot-editor" -Force
+          $exe = Get-ChildItem "$env:RUNNER_TEMP\godot-editor" -Filter "Godot*.exe" -Recurse | Select-Object -First 1
+          echo "GODOT_EXE=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Download export templates
+        shell: pwsh
+        run: |
+          $version = "4.7.2"
+          $url = "https://github.com/godotengine/godot/releases/download/$version-stable/Godot_v${version}-stable_export_templates.tpz"
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\export-templates.tpz"
+          $tplDir = "$env:APPDATA\Godot\export_templates\$version.stable"
+          New-Item -ItemType Directory -Force -Path $tplDir | Out-Null
+          # tpz is a zip
+          Expand-Archive -Path "$env:RUNNER_TEMP\export-templates.tpz" -DestinationPath "$env:RUNNER_TEMP\export-templates" -Force
+          Copy-Item -Path "$env:RUNNER_TEMP\export-templates\templates\*" -Destination $tplDir -Recurse -Force
+          Write-Host "Templates installed to $tplDir"
+
+      - name: Import and check project
+        shell: pwsh
+        run: |
+          & "$env:GODOT_EXE" --headless --path . --editor --quit
+
+      - name: Run Godot tests
+        shell: pwsh
+        run: |
+          & "$env:GODOT_EXE" --headless --path . --script res://tests/simulation_test.gd
+          & "$env:GODOT_EXE" --headless --path . --script res://tests/game_flow_test.gd
+          & "$env:GODOT_EXE" --headless --path . --script res://tests/network_test.gd
+          & "$env:GODOT_EXE" --headless --path . --script res://tests/telemetry_test.gd
+          & "$env:GODOT_EXE" --headless --path . --script res://tests/options_test.gd
+
+      - name: Export release
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build | Out-Null
+          & "$env:GODOT_EXE" --headless --path . --export-release "Windows Desktop (ARM64)" build/LANESHIFT.exe
+          if ($LASTEXITCODE -ne 0) { throw "Export failed" }
+          if (-not (Test-Path build/LANESHIFT.exe)) { throw "Missing executable" }
+
+      - name: Verify PE architecture (ARM64)
+        shell: pwsh
+        run: |
+          $bytes = [System.IO.File]::ReadAllBytes("build/LANESHIFT.exe")
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+          $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          Write-Host "PE machine: 0x$($machine.ToString('X4'))"
+          if ($machine -ne 0xAA64) { throw "Expected ARM64 (0xAA64), got 0x$($machine.ToString('X4'))" }
+
+      - name: Prepare portable root
+        shell: pwsh
+        run: |
+          $staging = "$env:RUNNER_TEMP\LANESHIFT-Portable"
+          if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+          Copy-Item build/LANESHIFT.exe $staging/
+          if (Test-Path build/LANESHIFT.pck) { Copy-Item build/LANESHIFT.pck $staging/ }
+          Copy-Item portable/* $staging/ -Recurse -Force
+          # Build info
+          $commit = "${{ github.sha }}"
+          $godot = "4.7.2"
+          "commit=$commit" | Out-File -FilePath "$staging/BUILD-INFO.txt" -Encoding ascii
+          "godot_version=$godot" | Out-File -FilePath "$staging/BUILD-INFO.txt" -Append -Encoding ascii
+          # manifest.json
+          $manifest = @{
+            build_commit = $commit
+            godot_version = $godot
+            artifact = "LANESHIFT-Windows-ARM64-Portable"
+          } | ConvertTo-Json
+          $manifest | Out-File -FilePath "$staging/manifest.json" -Encoding utf8
+          # Ensure dirs
+          New-Item -ItemType Directory -Force -Path "$staging/recordings","$staging/logs","$staging/config","$staging/transfer" | Out-Null
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LANESHIFT-Windows-ARM64-Portable
+          path: ${{ runner.temp }}/LANESHIFT-Portable
+          if-no-files-found: error

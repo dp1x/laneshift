@@ -10,6 +10,7 @@ func _initialize() -> void:
 func _run() -> void:
 	var game = MainScene.instantiate()
 	root.add_child(game)
+	game.start_recording()
 	var start_button = game.menu_panel.find_child("Start", true, false)
 	start_button.pressed.emit()
 	_check(game.state == "playing", "title-screen Start button should enter gameplay")
@@ -116,6 +117,28 @@ func _run() -> void:
 	game.state = "playing"
 	for i in range(8):
 		game._physics_process(1.0 / 30.0)
+
+	# The road must be rebuilt around the player when an episode restarts, or the
+	# player starts on bare ground.
+	game.sim.player_z = 900.0
+	game._recycle_road()
+	var road_covers_player := false
+	var road_ahead := false
+	for seg in game.road_segments:
+		var span: float = seg.mesh.size.z
+		if seg.position.z - span * 0.5 <= game.sim.player_z and seg.position.z + span * 0.5 >= game.sim.player_z:
+			road_covers_player = true
+		if seg.position.z > game.sim.player_z:
+			road_ahead = true
+	_check(road_covers_player, "the road must still be under the player after scrolling far")
+	_check(road_ahead, "the road must continue ahead of the player")
+	game.start_game(315, {"episode_duration": 0.1})
+	var reset_road_ok := false
+	for seg in game.road_segments:
+		if absf(seg.position.z) < 0.01:
+			reset_road_ok = true
+	_check(reset_road_ok, "restarting must bring the road back to the start of the world")
+	game.sim.finish_episode("timeout")
 
 	game.telemetry.close()
 	var telemetry_file := FileAccess.open(game.telemetry.session_dir + "/telemetry.jsonl", FileAccess.READ)

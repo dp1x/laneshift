@@ -1,6 +1,18 @@
 extends Node
 class_name TelemetryLogger
 
+const PortablePathsScript = preload("res://scripts/portable/portable_paths.gd")
+
+var output_base_dir: String = ""
+var build_commit: String = "dev"
+var build_godot_version: String = ""
+var schema_version: String = "1"
+var telemetry_record_count: int = 0
+var event_record_count: int = 0
+var episode_record_count: int = 0
+var utc_start_time: String = ""
+var utc_end_time: String = ""
+var session_status: String = "recording"
 var session_dir: String = ""
 var absolute_session_dir: String = ""
 var session_id: String = ""
@@ -28,10 +40,14 @@ var dropped_records: int = 0
 var recovery_files: Array[String] = []
 var degraded: bool = false
 
-func start_session() -> void:
+func start_session(base_dir: String = "") -> void:
+	if base_dir == "":
+		base_dir = PortablePathsScript.get_recordings_root()
+	output_base_dir = base_dir
+	DirAccess.make_dir_recursive_absolute(output_base_dir)
 	var ts := Time.get_datetime_string_from_system().replace(":", "").replace("-", "").replace("T", "_")
 	session_id = "session_%s_%03d" % [ts, int(Time.get_ticks_msec() % 1000)]
-	session_dir = "user://runs/%s" % session_id
+	session_dir = "%s/%s" % [output_base_dir, session_id]
 	absolute_session_dir = ProjectSettings.globalize_path(session_dir)
 	var err := DirAccess.make_dir_recursive_absolute(absolute_session_dir)
 	if err != OK:
@@ -48,11 +64,21 @@ func start_session() -> void:
 	events_buffer.clear()
 	episodes_buffer.clear()
 	telemetry_count = 0
+	telemetry_record_count = 0
+	event_record_count = 0
+	episode_record_count = 0
+	utc_start_time = Time.get_datetime_string_from_system(true)
+	utc_end_time = ""
+	session_status = "recording"
+	if build_godot_version == "":
+		build_godot_version = "%d.%d.%d" % [Engine.get_version_info()["major"], Engine.get_version_info()["minor"], Engine.get_version_info()["patch"]]
+	_write_manifest("recording")
 
 func log_telemetry(snapshot: Dictionary) -> void:
 	if not enabled:
 		return
 	telemetry_buffer.append(snapshot)
+	telemetry_record_count += 1
 	if telemetry_buffer.size() >= 60:
 		_queue_records("telemetry.jsonl", telemetry_buffer)
 		telemetry_buffer = []
@@ -61,6 +87,7 @@ func log_event(event: Dictionary) -> void:
 	if not enabled:
 		return
 	events_buffer.append(event)
+	event_record_count += 1
 	if events_buffer.size() >= 64:
 		_queue_records("events.jsonl", events_buffer)
 		events_buffer = []
@@ -69,6 +96,7 @@ func log_episode(summary: Dictionary) -> void:
 	if not enabled:
 		return
 	episodes_buffer.append(summary)
+	episode_record_count += 1
 	flush()
 
 func tick(delta: float) -> void:
@@ -211,6 +239,9 @@ func close() -> void:
 	if writer_closed:
 		return
 	flush()
+	utc_end_time = Time.get_datetime_string_from_system(true)
+	session_status = "complete"
+	_write_manifest("complete")
 	if writer_thread != null and writer_thread.is_started():
 		writer_mutex.lock()
 		writer_stopping = true
@@ -227,6 +258,30 @@ func _warn_write_failure(path: String, message: String) -> void:
 	if not warned_paths.has(path):
 		warned_paths[path] = true
 		push_warning("LaneShift: %s: %s" % [message, path])
+
+func _write_manifest(status: String) -> void:
+	session_status = status
+	if status == "complete":
+		utc_end_time = Time.get_datetime_string_from_system(true)
+	var manifest := {
+		"session_id": session_id,
+		"utc_start_time": utc_start_time,
+		"utc_end_time": utc_end_time,
+		"build_commit": build_commit,
+		"engine_version": build_godot_version,
+		"recording_schema_version": schema_version,
+		"status": session_status,
+		"counts": {
+			"telemetry": telemetry_record_count,
+			"events": event_record_count,
+			"episodes": episode_record_count
+		}
+	}
+	var path := absolute_session_dir.path_join("manifest.json")
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify(manifest, "\t"))
+		f.close()
 
 func get_session_path() -> String:
 	return ProjectSettings.globalize_path(session_dir) if session_dir != "" else ""
