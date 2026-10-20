@@ -199,7 +199,12 @@ func _report_writer_error() -> void:
 	var message := writer_error
 	writer_error = ""
 	writer_mutex.unlock()
-	if message != "":
+	if message == "":
+		return
+	if warned_paths.has(message):
+		return
+	warned_paths[message] = true
+	if is_inside_tree():
 		push_warning("LaneShift telemetry: " + message)
 
 func close() -> void:

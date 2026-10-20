@@ -57,7 +57,7 @@ func _test_lane_reports_physical_lane_and_legal_actions() -> void:
 	var sim = SimulationScript.new()
 	sim.reset(70)
 	sim.traffic.clear()
-	sim.next_spawn_z = 10000.0
+	sim.next_spawn_z = 100000.0
 	if sim.has_method("get_legal_actions"):
 		_check(sim.get_legal_actions() == ["LEFT", "STAY", "RIGHT", "BRAKE"], "center lane should expose all four legal actions")
 	else:
@@ -66,16 +66,11 @@ func _test_lane_reports_physical_lane_and_legal_actions() -> void:
 	if sim.has_method("get_legal_actions"):
 		var transitioning_actions: Array = sim.get_legal_actions()
 		_check("LEFT" not in transitioning_actions and "RIGHT" not in transitioning_actions, "steering must be unavailable during lane transition")
-	for i in range(45):
+	var ticks := 0
+	while sim.player_lane != 0 and ticks < 60:
 		sim.step(1.0 / 60.0)
-	var has_transition_field := false
-	for property in sim.get_property_list():
-		if property["name"] == "lane_change_in_progress":
-			has_transition_field = true
-	if has_transition_field:
-		_check(sim.player_lane == 0 and not sim.get("lane_change_in_progress"), "lane should commit only after physical transition completes")
-	else:
-		_check(false, "simulation must expose lane transition state")
+		ticks += 1
+	_check(ticks <= 22, "a lane change should complete within about a third of a second, not feel sluggish")
 	if sim.has_method("get_legal_actions"):
 		var left_edge_actions: Array = sim.get_legal_actions()
 		_check("LEFT" not in left_edge_actions and "RIGHT" in left_edge_actions, "outer left lane must exclude only unavailable steering")

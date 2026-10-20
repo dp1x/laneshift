@@ -32,7 +32,7 @@ var brake_timer: float = 0.0
 var action_timer: float = 0.0
 var lane_change_cooldown: float = 0.0
 var lane_change_in_progress: bool = false
-var lane_change_speed: float = 6.0
+var lane_change_speed: float = 15.0
 
 var traffic: Array = []
 var next_spawn_z: float = 60.0
@@ -241,12 +241,12 @@ func apply_action(action: String, duration: float = 0.5, source: String = "human
 		"LEFT":
 			player_target_lane = player_lane - 1
 			lane_change_in_progress = true
-			lane_change_cooldown = 0.2
+			lane_change_cooldown = 0.08
 			accepted = true
 		"RIGHT":
 			player_target_lane = player_lane + 1
 			lane_change_in_progress = true
-			lane_change_cooldown = 0.2
+			lane_change_cooldown = 0.08
 			accepted = true
 		"STAY":
 			accepted = true

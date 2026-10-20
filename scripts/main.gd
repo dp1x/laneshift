@@ -13,6 +13,10 @@ const DEFAULT_CONFIG := {
 const GROUND_SEGMENT_LENGTH := 3000.0
 const GROUND_SEGMENT_COUNT := 4
 const GROUND_RECYCLE_MARGIN := 250.0
+const ROAD_SEGMENT_LENGTH := 50.0
+const ROAD_SEGMENT_COUNT := 16
+const ROAD_WIDTH := 12.0
+const ROAD_TILE_LENGTH := 12.0
 
 var sim: Simulation
 var telemetry: TelemetryLogger
@@ -25,6 +29,8 @@ var road_root: Node3D
 var tree_root: Node3D
 var ground_segments: Array[MeshInstance3D] = []
 var blob_shadow_texture: GradientTexture2D = null
+var road_texture: ImageTexture = null
+var grass_texture: ImageTexture = null
 
 var ui_layer: CanvasLayer
 var hud: Control
@@ -77,6 +83,8 @@ var last_score_milestone: int = 0
 
 var road_segments: Array = []
 var tree_nodes: Array = []
+var hill_nodes: Array = []
+var cloud_nodes: Array = []
 var traffic_nodes: Dictionary = {}
 
 var shake_timer: float = 0.0
@@ -189,17 +197,18 @@ func _build_world() -> void:
 	# Real-time shadow maps are the single most expensive effect on a machine
 	# without a GPU, so shadows are drawn as cheap blob decals instead.
 	sun.shadow_enabled = false
-	sun.light_energy = 1.2
+	sun.light_color = Color(1.0, 0.96, 0.87)
+	sun.light_energy = 1.25
 	add_child(sun)
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
 	# The compatibility renderer has no depth fog, so the sky carries the haze:
 	# its horizon band is tinted to meet the ground colour.
 	var sky_material := ProceduralSkyMaterial.new()
-	sky_material.sky_top_color = Color(0.42, 0.6, 0.86)
-	sky_material.sky_horizon_color = Color(0.66, 0.76, 0.78)
-	sky_material.ground_horizon_color = Color(0.58, 0.7, 0.72)
-	sky_material.ground_bottom_color = Color(0.14, 0.22, 0.2)
+	sky_material.sky_top_color = Color(0.35, 0.55, 0.88)
+	sky_material.sky_horizon_color = Color(0.74, 0.83, 0.86)
+	sky_material.ground_horizon_color = Color(0.66, 0.76, 0.76)
+	sky_material.ground_bottom_color = Color(0.22, 0.32, 0.28)
 	sky_material.sun_angle_max = 40.0
 	var sky := Sky.new()
 	sky.sky_material = sky_material
@@ -215,7 +224,9 @@ func _build_world() -> void:
 	road_root = Node3D.new()
 	add_child(road_root)
 	var ground_material := StandardMaterial3D.new()
-	ground_material.albedo_color = Color(0.16, 0.25, 0.22)
+	ground_material.albedo_color = Color(1, 1, 1)
+	ground_material.albedo_texture = _grass_texture()
+	ground_material.uv1_scale = Vector3(26.0, 60.0, 1.0)
 	for i in range(GROUND_SEGMENT_COUNT):
 		var ground := MeshInstance3D.new()
 		ground.name = "GroundSegment%d" % i
@@ -239,6 +250,7 @@ func _build_world() -> void:
 
 	# player
 	player_node = _create_motorcycle()
+	player_node.scale = Vector3.ONE * 1.15
 	add_child(player_node)
 
 	# camera
@@ -248,57 +260,117 @@ func _build_world() -> void:
 	_update_camera(true)
 
 func _build_road() -> void:
-	for i in range(6):
+	for i in range(ROAD_SEGMENT_COUNT):
 		var seg := _create_road_segment()
-		seg.position.z = i * 20.0
+		seg.position.z = i * ROAD_SEGMENT_LENGTH
 		road_root.add_child(seg)
 		road_segments.append(seg)
 
+## Builds the road surface, markings and guard rails procedurally. The lane
+## markings are painted into a repeating texture rather than modelled, which
+## keeps long stretches of road cheap to draw.
 func _create_road_segment() -> Node3D:
 	var seg := Node3D.new()
-	# asphalt
 	var mesh := BoxMesh.new()
-	mesh.size = Vector3(12, 0.2, 20)
+	mesh.size = Vector3(ROAD_WIDTH, 0.2, ROAD_SEGMENT_LENGTH)
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.18, 0.19, 0.22)
+	# The texture already carries the surface colour, so the albedo stays white
+	# instead of darkening it a second time.
+	mat.albedo_color = Color(1, 1, 1)
+	mat.albedo_texture = _road_texture()
+	mat.uv1_scale = Vector3(1.0, ROAD_SEGMENT_LENGTH / ROAD_TILE_LENGTH, 1.0)
 	mi.material_override = mat
 	mi.position.y = -0.1
 	seg.add_child(mi)
-	# side strips
+
+	# guard rails along both edges
 	for side in [-1, 1]:
-		var sm := BoxMesh.new()
-		sm.size = Vector3(0.3, 0.25, 20)
-		var simi := MeshInstance3D.new()
-		simi.mesh = sm
-		var smat := StandardMaterial3D.new()
-		smat.albedo_color = Color(0.8, 0.8, 0.8)
-		simi.material_override = smat
-		simi.position = Vector3(side * 6.15, 0.0, 0)
-		seg.add_child(simi)
-	# dashed lane boundaries between the three lane centers
-	for lx in [-2.0, 2.0]:
-		# dashed
-		for j in range(5):
-			var lm := BoxMesh.new()
-			lm.size = Vector3(0.15, 0.02, 2.0)
-			var lmi := MeshInstance3D.new()
-			lmi.mesh = lm
-			var lmat := StandardMaterial3D.new()
-			lmat.albedo_color = Color(0.95, 0.9, 0.3)
-			lmi.material_override = lmat
-			lmi.position = Vector3(lx, 0.02, -8.0 + j * 4.0)
-			seg.add_child(lmi)
+		var rail := MeshInstance3D.new()
+		var rail_mesh := BoxMesh.new()
+		rail_mesh.size = Vector3(0.12, 0.3, ROAD_SEGMENT_LENGTH)
+		rail.mesh = rail_mesh
+		var rail_material := StandardMaterial3D.new()
+		rail_material.albedo_color = Color(0.72, 0.74, 0.78)
+		rail_material.metallic = 0.6
+		rail_material.roughness = 0.45
+		rail.material_override = rail_material
+		rail.position = Vector3(side * 6.35, 0.55, 0)
+		seg.add_child(rail)
+		# posts
+		for i in range(ROAD_SEGMENT_LENGTH / 12.5):
+			var post := MeshInstance3D.new()
+			var post_mesh := BoxMesh.new()
+			post_mesh.size = Vector3(0.1, 0.9, 0.1)
+			post.mesh = post_mesh
+			var post_material := StandardMaterial3D.new()
+			post_material.albedo_color = Color(0.5, 0.52, 0.55)
+			post.material_override = post_material
+			post.position = Vector3(side * 6.35, 0.3, -ROAD_SEGMENT_LENGTH * 0.5 + 6.0 + i * 12.5)
+			seg.add_child(post)
 	return seg
 
+## Paints one repeating tile of road: asphalt grain, solid white edge lines
+## and dashed yellow lane boundaries, at the exact lane geometry.
+func _road_texture() -> ImageTexture:
+	if road_texture != null:
+		return road_texture
+	var size := 256
+	var image := Image.create_empty(size, size, false, Image.FORMAT_RGB8)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20240517
+	for y in range(size):
+		for x in range(size):
+			var u := float(x) / float(size)
+			var v := float(y) / float(size)
+			var grain := rng.randf_range(-0.04, 0.04)
+			var color := Color(0.30 + grain, 0.31 + grain, 0.34 + grain)
+			# solid white edge lines
+			if u < 0.035 or u > 0.965:
+				color = Color(0.92, 0.92, 0.90)
+			# dashed yellow lane boundaries: 3m dash inside a 12m tile
+			var dash := fmod(v * 4.0, 1.0) < 0.25
+			if dash and (u > 0.315 and u < 0.352 or u > 0.648 and u < 0.685):
+				color = Color(0.98, 0.80, 0.14)
+			image.set_pixel(x, y, color)
+	road_texture = ImageTexture.create_from_image(image)
+	return road_texture
+
+func _grass_texture() -> ImageTexture:
+	if grass_texture != null:
+		return grass_texture
+	var size := 128
+	var image := Image.create_empty(size, size, false, Image.FORMAT_RGB8)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 991
+	for y in range(size):
+		for x in range(size):
+			var n := rng.randf_range(-0.05, 0.05)
+			var patch := sin(float(x) * 0.21) * cos(float(y) * 0.17) * 0.03
+			image.set_pixel(x, y, Color(0.27 + n + patch, 0.44 + n + patch, 0.29 + n + patch))
+	grass_texture = ImageTexture.create_from_image(image)
+	return grass_texture
+
 func _build_trees() -> void:
-	for i in range(28):
+	for i in range(22):
 		var t := _create_tree()
 		var side := -1 if i % 2 == 0 else 1
-		t.position = Vector3(side * rng_visual.randf_range(8.0, 14.0), 0, i * 11.0 - 40.0)
+		t.position = Vector3(side * rng_visual.randf_range(9.0, 16.0), 0, i * 16.0 - 60.0)
 		tree_root.add_child(t)
 		tree_nodes.append(t)
+	# distant scenery that scrolls with the road
+	for i in range(6):
+		var hill := _create_hill()
+		var side := -1 if i % 2 == 0 else 1
+		hill.position = Vector3(side * rng_visual.randf_range(90.0, 220.0), 0, i * 260.0 - 200.0)
+		tree_root.add_child(hill)
+		hill_nodes.append(hill)
+	for i in range(7):
+		var cloud := _create_cloud()
+		cloud.position = Vector3(rng_visual.randf_range(-160.0, 160.0), rng_visual.randf_range(55.0, 95.0), i * 220.0 - 150.0)
+		tree_root.add_child(cloud)
+		cloud_nodes.append(cloud)
 
 func _add_blob_shadow(parent: Node3D, size: Vector2, offset: Vector3 = Vector3.ZERO) -> void:
 	var shadow := MeshInstance3D.new()
@@ -334,31 +406,77 @@ func _create_tree() -> Node3D:
 	var t := Node3D.new()
 	var trunk := MeshInstance3D.new()
 	var cm := CylinderMesh.new()
-	cm.top_radius = 0.2
-	cm.bottom_radius = 0.3
-	cm.height = 2.0
+	cm.top_radius = 0.16
+	cm.bottom_radius = 0.34
+	cm.height = 2.4
 	cm.radial_segments = 6
 	cm.rings = 1
 	trunk.mesh = cm
 	var tmat := StandardMaterial3D.new()
-	tmat.albedo_color = Color(0.35, 0.22, 0.12)
+	tmat.albedo_color = Color(0.32, 0.21, 0.13)
 	trunk.material_override = tmat
-	trunk.position.y = 1.0
+	trunk.position.y = 1.2
 	t.add_child(trunk)
-	var foliage := MeshInstance3D.new()
-	var sm := SphereMesh.new()
-	sm.radius = 1.6
-	sm.height = 3.2
-	sm.radial_segments = 8
-	sm.rings = 4
-	foliage.mesh = sm
-	var fmat := StandardMaterial3D.new()
-	fmat.albedo_color = Color(0.18, 0.45, 0.2)
-	foliage.material_override = fmat
-	foliage.position.y = 3.2
-	t.add_child(foliage)
-	_add_blob_shadow(t, Vector2(3.4, 3.4), Vector3(0.7, 0, 0.4))
+	# layered canopy: three overlapping crowns of slightly different greens
+	var crowns := [
+		[Vector3(0, 3.3, 0), 1.75, Color(0.16, 0.42, 0.19)],
+		[Vector3(0.45, 2.75, 0.25), 1.25, Color(0.20, 0.50, 0.22)],
+		[Vector3(-0.4, 2.95, -0.2), 1.1, Color(0.13, 0.36, 0.17)]
+	]
+	for crown in crowns:
+		var foliage := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = float(crown[1])
+		sm.height = float(crown[1]) * 1.7
+		sm.radial_segments = 7
+		sm.rings = 4
+		foliage.mesh = sm
+		var fmat := StandardMaterial3D.new()
+		fmat.albedo_color = crown[2]
+		foliage.material_override = fmat
+		foliage.position = crown[0]
+		t.add_child(foliage)
+	_add_blob_shadow(t, Vector2(3.8, 3.8), Vector3(0.8, 0, 0.4))
 	return t
+
+## A low, wide mound far out on either side, to break the flat horizon.
+func _create_hill() -> Node3D:
+	var hill := Node3D.new()
+	for i in range(3):
+		var mound := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = rng_visual.randf_range(40.0, 70.0)
+		sm.height = sm.radius * rng_visual.randf_range(0.5, 0.9)
+		sm.radial_segments = 8
+		sm.rings = 4
+		mound.mesh = sm
+		var material := StandardMaterial3D.new()
+		material.albedo_color = Color(0.14, 0.26, 0.24)
+		mound.material_override = material
+		mound.position = Vector3(rng_visual.randf_range(-25, 25), -sm.height * 0.42, rng_visual.randf_range(-30, 30))
+		hill.add_child(mound)
+	return hill
+
+## A soft cloud puff, drawn high and far away.
+func _create_cloud() -> Node3D:
+	var cloud := Node3D.new()
+	for i in range(4):
+		var puff := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = rng_visual.randf_range(8.0, 16.0)
+		sm.height = sm.radius * 0.8
+		sm.radial_segments = 7
+		sm.rings = 3
+		puff.mesh = sm
+		var material := StandardMaterial3D.new()
+		material.albedo_color = Color(0.99, 0.99, 1.0)
+		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		material.albedo_color.a = 0.92
+		puff.material_override = material
+		puff.position = Vector3(rng_visual.randf_range(-14, 14), rng_visual.randf_range(-2, 2), rng_visual.randf_range(-8, 8))
+		puff.scale = Vector3(1.0, 0.55, 1.0)
+		cloud.add_child(puff)
+	return cloud
 
 func _make_box(parent: Node3D, size: Vector3, color: Color, position: Vector3, rotation_deg: Vector3 = Vector3.ZERO) -> MeshInstance3D:
 	var node := MeshInstance3D.new()
@@ -750,7 +868,9 @@ func start_game(seed: int = -1, cfg: Dictionary = {}, requested_episode_id: Stri
 	gameover_panel.visible = false
 	state = "playing"
 	player_node.visible = true
+	_reset_world_positions()
 	_reset_traffic_nodes()
+	_update_camera(true)
 	telemetry_timer = 0.0
 	decision_timer = 0.0
 
@@ -998,7 +1118,8 @@ func _physics_process(delta: float) -> void:
 func _handle_human_input(delta: float) -> void:
 	if external_control:
 		return
-	# brake held
+	# Brake is a held action, so it is polled; steering is handled by _input
+	# so a press is acted on immediately instead of waiting for a poll.
 	var brake_now := Input.is_key_pressed(KEY_SPACE) or Input.is_key_pressed(KEY_DOWN)
 	if brake_now:
 		if not brake_held:
@@ -1010,19 +1131,16 @@ func _handle_human_input(delta: float) -> void:
 		if brake_held:
 			brake_held = false
 			_submit_action("STAY", 0.1, "human", "human")
-	if not has_meta("prev_left"):
-		set_meta("prev_left", false)
-		set_meta("prev_right", false)
-	var prev_left: bool = get_meta("prev_left")
-	var prev_right: bool = get_meta("prev_right")
-	var left_now := Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT)
-	var right_now := Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT)
-	if left_now and not prev_left:
-		_submit_action("LEFT", 0.3, "human", "human")
-	if right_now and not prev_right:
-		_submit_action("RIGHT", 0.3, "human", "human")
-	set_meta("prev_left", left_now)
-	set_meta("prev_right", right_now)
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if state != "playing" or external_control:
+			return
+		match event.keycode:
+			KEY_A, KEY_LEFT:
+				_submit_action("LEFT", 0.2, "human", "human")
+			KEY_D, KEY_RIGHT:
+				_submit_action("RIGHT", 0.2, "human", "human")
 
 func _process(delta: float) -> void:
 	# pause toggle
@@ -1107,7 +1225,7 @@ func _sync_traffic_nodes() -> void:
 	# update player
 	player_node.position = Vector3(sim.player_x, 0, sim.player_z)
 	player_node.rotation_degrees.y = 0
-	player_node.rotation_degrees.z = clamp(-sim.player_velocity_x * 2.0, -14.0, 14.0)
+	player_node.rotation_degrees.z = clampf(-sim.player_velocity_x * 2.4, -24.0, 24.0)
 	var brake_material := tail_light.material_override as StandardMaterial3D
 	brake_material.albedo_color = Color(1.0, 0.08, 0.03) if sim.braking else Color(0.4, 0.03, 0.02)
 	brake_material.emission = Color(1.0, 0.02, 0.01) if sim.braking else Color(0.25, 0.01, 0.0)
@@ -1124,23 +1242,48 @@ func _recycle_ground() -> void:
 func _recycle_road() -> void:
 	for seg in road_segments:
 		while seg.position.z < sim.player_z - 30:
-			seg.position.z += 6 * 20.0
+			seg.position.z += ROAD_SEGMENT_COUNT * ROAD_SEGMENT_LENGTH
+
+## Puts the whole world back around the origin. A reset drops the player to
+## z=0, so without this the road and scenery stay where the last episode
+## ended and the player would start on bare ground.
+func _reset_world_positions() -> void:
+	for i in range(road_segments.size()):
+		road_segments[i].position.z = i * ROAD_SEGMENT_LENGTH
+	for i in range(ground_segments.size()):
+		ground_segments[i].position.z = 120.0 + i * GROUND_SEGMENT_LENGTH
+	for i in range(tree_nodes.size()):
+		var side := -1 if i % 2 == 0 else 1
+		tree_nodes[i].position = Vector3(side * rng_visual.randf_range(9.0, 16.0), 0, i * 16.0 - 60.0)
+	for i in range(hill_nodes.size()):
+		var hside := -1 if i % 2 == 0 else 1
+		hill_nodes[i].position = Vector3(hside * rng_visual.randf_range(90.0, 220.0), 0, i * 260.0 - 200.0)
+	for i in range(cloud_nodes.size()):
+		cloud_nodes[i].position = Vector3(rng_visual.randf_range(-160.0, 160.0), rng_visual.randf_range(55.0, 95.0), i * 220.0 - 150.0)
 
 func _recycle_trees() -> void:
 	for t in tree_nodes:
-		while t.position.z < sim.player_z - 40:
-			t.position.z += 28 * 11.0
-			var side := -1 if t.position.x < 0 else 1
-			t.position.x = side * rng_visual.randf_range(8.0, 14.0)
+		while t.position.z < sim.player_z - 60:
+			t.position.z += 22 * 16.0
+	for hill in hill_nodes:
+		while hill.position.z < sim.player_z - 400:
+			hill.position.z += 6 * 260.0
+	for cloud in cloud_nodes:
+		while cloud.position.z < sim.player_z - 300:
+			cloud.position.z += 7 * 220.0
 
 func _update_camera(force: bool) -> void:
 	var target := Vector3(sim.player_x, 0, sim.player_z)
-	var cam_pos := target + Vector3(0, 4.0, -6.2)
+	var cam_pos := target + Vector3(0, 3.5, -5.6)
 	if force:
 		camera.position = cam_pos
 	else:
 		camera.position = camera.position.lerp(cam_pos, 0.12)
-	camera.look_at(target + Vector3(0, 1.1, 9.0), Vector3.UP)
+	camera.look_at(target + Vector3(0, 1.0, 10.5), Vector3.UP)
+	# widen the view with speed: cheap, and it reads as acceleration
+	var speed_ratio := clampf((sim.player_speed - sim.base_speed) / maxf(1.0, sim.max_speed - sim.base_speed), 0.0, 1.0)
+	var target_fov := 60.0 + speed_ratio * 9.0
+	camera.fov = lerpf(camera.fov, target_fov, 0.06 if not force else 1.0)
 
 func _update_hud() -> void:
 	score_label.text = "Score: %.0f" % sim.score
