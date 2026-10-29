@@ -315,7 +315,7 @@ def main(argv=None):
     model_registry = {}
     if args.model_registry:
         try:
-            model_registry = json.loads(Path(args.model_registry).read_text(encoding="utf-8"))
+            model_registry = json.loads(Path(args.model_registry).read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError) as exc:
             raise SystemExit(f"could not read model registry {args.model_registry}: {exc}")
         if isinstance(model_registry, dict) and isinstance(model_registry.get("models"), dict):

@@ -1,6 +1,6 @@
 # LANESHIFT
 
-A telemetry-first driving simulator for experimenting with small AI decision models.
+A telemetry-first 2D driving simulator for experimenting with small AI decision models.
 
 LANESHIFT is an early-stage research prototype. It provides a small driving environment in which a human or an external controller can play, while the simulator records state and outcomes directly.
 
@@ -23,7 +23,7 @@ What has **not** been established:
 - Fine-tuning has not been performed.
 - No claim has been made that any model improves gameplay over the rule-based baseline.
 
-The game itself is a rough prototype. Its graphics are functional low-poly shapes, the driving model is kinematic rather than physical, and both are still being iterated on. Do not treat it as polished or production-ready.
+The game itself is a rough 2D prototype. Its graphics are simple vector shapes, the driving model is kinematic rather than physical, and both are still being iterated on. Do not treat it as polished or production-ready.
 
 ## Running the game
 
@@ -46,6 +46,18 @@ Controls:
 | `Escape` | Pause or resume |
 
 Lane changes ease over about half a second and are applied once per press. Braking slows the bike, which changes how quickly traffic is caught. A collision ends the run.
+
+## Recording human gameplay
+
+Click **Record** in the top bar, or press `F9`, to start a recording session. The
+button changes to **Stop**, and the bar shows `REC` with elapsed time, sample count,
+and event count. Recording stays active across crashes and restarts until you stop it.
+Every session writes `manifest.json`, `telemetry.jsonl`, `events.jsonl`, and
+`episodes.jsonl` under `<portable root>/recordings/`.
+
+The session manifest records the session ID, UTC start and end times, build commit,
+engine version, recording schema version, status, and record counts. Human actions are
+labelled `human`; they are never relabelled as model actions.
 
 ## Running the Python controller
 
@@ -118,16 +130,20 @@ godot --headless --path . -- --auto-run --seeds=303 --episode-duration=100 --ext
 
 ## Telemetry and data
 
-Every launch writes a new session directory under the Godot user data location:
+Every recording writes a new session directory under the portable root:
 
 ```text
-%APPDATA%\Godot\app_userdata\LANESHIFT\runs\session_<timestamp>_<suffix>\
+<portable root>/recordings/session_<timestamp>_<suffix>/
   telemetry.jsonl
   events.jsonl
   episodes.jsonl
+  manifest.json
 ```
 
-These files are runtime data. They are not tracked by Git.
+In the editor, the portable root is the project-relative `.portable-dev/`
+directory. In an exported build, it is the directory that contains the
+executable. Application-managed output never goes to `user://`, `%APPDATA%`,
+`%TEMP%`, or an arbitrary working directory.
 
 The three files record different things:
 
@@ -251,8 +267,8 @@ python -m pip install -r python/requirements.txt
 
 - Real Kev-0.8B CPU inference works on this machine, but it is slow enough (about 15 s per decision) that it cannot steer at the game's normal decision rate.
 - Fine-tuning has not been performed, and the model's effect on gameplay has not been measured.
-- The game is a simple experimental environment, not a realistic traffic simulator. Vehicles move along fixed lanes at constant speeds, and there is no acceleration model for traffic.
-- The compatibility renderer is used by default so the game runs on machines without a GPU. It has no depth fog, so distance haze is approximated with a procedural sky gradient. Real-time shadow maps are replaced with soft blob decals for the same reason.
+- The game is a simple 2D experimental environment, not a realistic traffic simulator. Vehicles move along fixed lanes at constant speeds, and there is no acceleration model for traffic.
+- The top-down renderer uses vector shapes and a fixed X/Z split: the road stays readable while the view still shows oncoming traffic. It is intentionally minimal.
 - Steering is discrete: the motorcycle changes lanes on rails rather than being steered continuously.
 
 ## Roadmap
@@ -269,7 +285,7 @@ python -m pip install -r python/requirements.txt
 project.godot            Godot project settings
 kev_models.example.json  Template registry of model policies
 scenes/main.tscn         Main scene; the world is built procedurally at runtime
-scripts/main.gd          World construction, camera, HUD, input, episode flow
+scripts/main.gd          Top-down 2D rendering, HUD, input, episode flow, recording
 scripts/sim/simulation.gd Authoritative simulation: state, actions, seeded traffic, collisions
 scripts/net/net_bridge.gd WebSocket client and command validation
 scripts/telemetry/telemetry_logger.gd  Buffered JSONL writer

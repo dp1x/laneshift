@@ -14,16 +14,6 @@ func _run() -> void:
 	var start_button = game.menu_panel.find_child("Start", true, false)
 	start_button.pressed.emit()
 	_check(game.state == "playing", "title-screen Start button should enter gameplay")
-	var ground = game.road_root.get_child(0)
-	var original_ground_z: float = ground.position.z
-	game.sim.player_z = 1000.0
-	if game.has_method("_recycle_ground"):
-		game._recycle_ground()
-		_check(ground.position.z + (ground.mesh as BoxMesh).size.z * 0.5 >= game.sim.player_z + 120.0, "ground must recycle beyond the player for the endless road")
-	else:
-		_check(false, "ground terrain must recycle with the endless road")
-	ground.position.z = original_ground_z
-	game.sim.player_z = 0.0
 
 	var press := InputEventKey.new()
 	press.keycode = KEY_A
@@ -118,26 +108,6 @@ func _run() -> void:
 	for i in range(8):
 		game._physics_process(1.0 / 30.0)
 
-	# The road must be rebuilt around the player when an episode restarts, or the
-	# player starts on bare ground.
-	game.sim.player_z = 900.0
-	game._recycle_road()
-	var road_covers_player := false
-	var road_ahead := false
-	for seg in game.road_segments:
-		var span: float = seg.mesh.size.z
-		if seg.position.z - span * 0.5 <= game.sim.player_z and seg.position.z + span * 0.5 >= game.sim.player_z:
-			road_covers_player = true
-		if seg.position.z > game.sim.player_z:
-			road_ahead = true
-	_check(road_covers_player, "the road must still be under the player after scrolling far")
-	_check(road_ahead, "the road must continue ahead of the player")
-	game.start_game(315, {"episode_duration": 0.1})
-	var reset_road_ok := false
-	for seg in game.road_segments:
-		if absf(seg.position.z) < 0.01:
-			reset_road_ok = true
-	_check(reset_road_ok, "restarting must bring the road back to the start of the world")
 	game.sim.finish_episode("timeout")
 
 	game.telemetry.close()
@@ -167,14 +137,11 @@ func _steering_matches_screen(game) -> bool:
 	game.sim.reset(4242, {"traffic_density": 0.0})
 	game.sim.traffic.clear()
 	game.sim.next_spawn_z = 100000.0
-	game._update_camera(true)
-	var camera_forward: Vector3 = -game.camera.global_transform.basis.z
-	var screen_right: Vector3 = camera_forward.cross(Vector3.UP).normalized()
-	var before: float = (game.sim.get_snapshot()["player"]["position"]["x"] - game.camera.global_position.x) * screen_right.x
+	var before: float = game._world_to_screen_x(game.sim.get_snapshot()["player"]["position"]["x"])
 	game.sim.apply_action("LEFT", 0.4, "human")
 	for i in range(40):
 		game.sim.step(1.0 / 60.0)
-	var after: float = (game.sim.get_snapshot()["player"]["position"]["x"] - game.camera.global_position.x) * screen_right.x
+	var after: float = game._world_to_screen_x(game.sim.get_snapshot()["player"]["position"]["x"])
 	return after < before
 
 func _check(condition: bool, message: String) -> void:

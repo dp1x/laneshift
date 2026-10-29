@@ -387,7 +387,7 @@ async def run_server(args):
     if args.kev_config:
         config_path = Path(args.kev_config)
         try:
-            model_configs = json.loads(config_path.read_text(encoding="utf-8"))
+            model_configs = json.loads(config_path.read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError) as exc:
             raise ValueError(f"could not read Kev model registry {config_path}: {exc}") from exc
         if not isinstance(model_configs, dict):
@@ -429,6 +429,11 @@ async def run_server(args):
             print(f"LaneShift controller listening at ws://127.0.0.1:{args.port} ({args.policy})", flush=True)
             if args.expected_episodes:
                 await server.shutdown_event.wait()
+            else:
+                # No episode budget: serve until interrupted. Without this the
+                # context manager exits immediately and the controller closes
+                # the socket before the game can connect.
+                await asyncio.Event().wait()
         lag_task.cancel()
     result = server.metrics()
     print("LANESHIFT_METRICS " + json.dumps(result, separators=(",", ":")), flush=True)

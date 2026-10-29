@@ -1,7 +1,6 @@
-extends Node3D
+extends Node2D
 
-const PortablePathsScriptScript = preload("res://scripts/portable/portable_paths.gd")
-const PortablePathsScript = PortablePathsScriptScript
+const PortablePathsScript = preload("res://scripts/portable/portable_paths.gd")
 
 const DEFAULT_CONFIG := {
 	"traffic_density": 0.7,
@@ -13,27 +12,20 @@ const DEFAULT_CONFIG := {
 	"base_speed": 20.0,
 	"max_speed": 28.0
 }
-const GROUND_SEGMENT_LENGTH := 3000.0
-const GROUND_SEGMENT_COUNT := 4
-const GROUND_RECYCLE_MARGIN := 250.0
-const ROAD_SEGMENT_LENGTH := 50.0
-const ROAD_SEGMENT_COUNT := 16
-const ROAD_WIDTH := 12.0
-const ROAD_TILE_LENGTH := 12.0
+
+# 2D presentation constants. World units are metres; the simulation is unchanged.
+# X and Z use separate pixel scales: the road stays wide and readable while the
+# top-down view still shows enough distance ahead to see traffic coming.
+const LANE_PX := 120.0
+const ROAD_HALF_PX := 180.0
+const PX_PER_M_Z := 10.0
+const DASH_LENGTH := 26.0
+const DASH_GAP := 24.0
+const PLAYER_SCREEN_Y := 0.78
 
 var sim: Simulation
 var telemetry: TelemetryLogger
 var net: NetBridge
-
-var camera: Camera3D
-var player_node: Node3D
-var traffic_root: Node3D
-var road_root: Node3D
-var tree_root: Node3D
-var ground_segments: Array[MeshInstance3D] = []
-var blob_shadow_texture: GradientTexture2D = null
-var road_texture: ImageTexture = null
-var grass_texture: ImageTexture = null
 
 var ui_layer: CanvasLayer
 var hud: Control
@@ -53,7 +45,6 @@ var gameover_result_label: Label
 var record_button: Button
 var record_status_label: Label
 var notice_label: Label
-var tail_light: MeshInstance3D
 var notice_timer: float = 0.0
 
 var best_score: float = 0.0
@@ -63,7 +54,6 @@ var telemetry_timer: float = 0.0
 var telemetry_hz: float = 30.0
 var decision_timer: float = 0.0
 var decision_hz: float = 10.0
-var net_send_timer: float = 0.0
 
 var control_mode: String = "human" # human, auto
 var external_control: bool = false
@@ -86,16 +76,11 @@ var decision_state_history: Dictionary = {}
 var decision_state_history_seconds: float = 180.0
 var last_score_milestone: int = 0
 
-var road_segments: Array = []
-var tree_nodes: Array = []
-var hill_nodes: Array = []
-var cloud_nodes: Array = []
-var traffic_nodes: Dictionary = {}
-
 var build_commit: String = "dev"
 var build_godot_version: String = ""
 var shake_timer: float = 0.0
 var shake_intensity: float = 0.0
+var shake_offset: Vector2 = Vector2.ZERO
 
 var recording_active: bool = false
 var recording_session_id: String = ""
@@ -121,7 +106,6 @@ func _ready() -> void:
 	sim.episode_ended.connect(_on_episode_ended)
 	sim.scenario_initialized.connect(_on_scenario_init)
 	sim.vehicle_overtaken.connect(_on_vehicle_overtaken)
-	_build_world()
 	_build_ui()
 	telemetry = TelemetryLogger.new()
 	add_child(telemetry)
@@ -136,6 +120,7 @@ func _ready() -> void:
 	net.disconnected.connect(_on_net_disconnected)
 	if auto_run:
 		_start_auto_run()
+	queue_redraw()
 
 func _parse_args() -> void:
 	var args := OS.get_cmdline_user_args()
@@ -156,8 +141,6 @@ func _parse_args() -> void:
 		auto_seeds = [1]
 	auto_episodes_per_seed = max(1, auto_episodes_per_seed)
 
-## Parses "--key=value" options. Splitting on the first "=" keeps the value
-## intact, so an option can never be silently mis-read.
 static func parse_options(args: PackedStringArray) -> Dictionary:
 	var options := {
 		"auto_run": false,
@@ -204,436 +187,135 @@ static func parse_options(args: PackedStringArray) -> Dictionary:
 				options["decision_history_s"] = maxf(float(value), 1.0)
 	return options
 
-func _build_world() -> void:
-	# lighting
-	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-45, -30, 0)
-	# Real-time shadow maps are the single most expensive effect on a machine
-	# without a GPU, so shadows are drawn as cheap blob decals instead.
-	sun.shadow_enabled = false
-	sun.light_color = Color(1.0, 0.96, 0.87)
-	sun.light_energy = 1.25
-	add_child(sun)
-	var env := WorldEnvironment.new()
-	var e := Environment.new()
-	# The compatibility renderer has no depth fog, so the sky carries the haze:
-	# its horizon band is tinted to meet the ground colour.
-	var sky_material := ProceduralSkyMaterial.new()
-	sky_material.sky_top_color = Color(0.35, 0.55, 0.88)
-	sky_material.sky_horizon_color = Color(0.74, 0.83, 0.86)
-	sky_material.ground_horizon_color = Color(0.66, 0.76, 0.76)
-	sky_material.ground_bottom_color = Color(0.22, 0.32, 0.28)
-	sky_material.sun_angle_max = 40.0
-	var sky := Sky.new()
-	sky.sky_material = sky_material
-	e.background_mode = Environment.BG_SKY
-	e.sky = sky
-	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	e.ambient_light_color = Color(0.6, 0.65, 0.7)
-	e.ambient_light_energy = 0.4
-	env.environment = e
-	add_child(env)
+# ---------------------------------------------------------------------------
+# 2D rendering
+# ---------------------------------------------------------------------------
 
-	# road root
-	road_root = Node3D.new()
-	add_child(road_root)
-	var ground_material := StandardMaterial3D.new()
-	ground_material.albedo_color = Color(1, 1, 1)
-	ground_material.albedo_texture = _grass_texture()
-	ground_material.uv1_scale = Vector3(26.0, 60.0, 1.0)
-	for i in range(GROUND_SEGMENT_COUNT):
-		var ground := MeshInstance3D.new()
-		ground.name = "GroundSegment%d" % i
-		var ground_mesh := BoxMesh.new()
-		ground_mesh.size = Vector3(400, 0.2, GROUND_SEGMENT_LENGTH)
-		ground.mesh = ground_mesh
-		ground.material_override = ground_material
-		ground.position = Vector3(0, -0.32, 120.0 + i * GROUND_SEGMENT_LENGTH)
-		road_root.add_child(ground)
-		ground_segments.append(ground)
-	_build_road()
+func _world_to_screen_x(world_x: float) -> float:
+	var center_x := get_viewport_rect().size.x * 0.5
+	return center_x - (world_x / 4.0) * LANE_PX
 
-	# trees
-	tree_root = Node3D.new()
-	add_child(tree_root)
-	_build_trees()
+func _draw() -> void:
+	if sim == null:
+		return
+	var view := get_viewport_rect().size
+	var center_x := view.x * 0.5
+	var player_y := view.y * PLAYER_SCREEN_Y
+	var road_half := ROAD_HALF_PX
+	var lane_px := LANE_PX
 
-	# traffic root
-	traffic_root = Node3D.new()
-	add_child(traffic_root)
+	draw_set_transform(shake_offset, 0.0, Vector2.ONE)
+
+	# grass background with soft scrolling bands
+	draw_rect(Rect2(Vector2.ZERO, view), Color(0.075, 0.135, 0.085))
+	var band_offset := fmod(sim.player_z * PX_PER_M_Z, 96.0)
+	var by := -96.0 + band_offset
+	while by < view.y:
+		draw_rect(Rect2(0, by, view.x, 48), Color(0.085, 0.155, 0.095))
+		by += 96.0
+
+	# road
+	draw_rect(Rect2(center_x - road_half, 0, road_half * 2.0, view.y), Color(0.115, 0.125, 0.14))
+	draw_rect(Rect2(center_x - road_half - 8, 0, 8, view.y), Color(0.72, 0.74, 0.76))
+	draw_rect(Rect2(center_x + road_half, 0, 8, view.y), Color(0.72, 0.74, 0.76))
+
+	# dashed lane dividers, scrolling toward the player
+	var period := DASH_LENGTH + DASH_GAP
+	var dash_offset := fmod(sim.player_z * PX_PER_M_Z, period)
+	var dy := -period + dash_offset
+	for lane_x in [center_x - lane_px, center_x + lane_px]:
+		var y := dy
+		while y < view.y + period:
+			draw_rect(Rect2(lane_x - 2, y, 4, DASH_LENGTH), Color(0.85, 0.88, 0.9, 0.8))
+			y += period
+
+	# roadside posts
+	var post_start: float = floor(sim.player_z / 24.0) * 24.0
+	for i in range(-2, 14):
+		var z: float = post_start + i * 24.0
+		var py: float = player_y - (z - sim.player_z) * PX_PER_M_Z
+		if py < -40 or py > view.y + 40:
+			continue
+		for side in [-1, 1]:
+			var px: float = center_x + side * (road_half + 30.0)
+			draw_rect(Rect2(px - 4, py - 20, 8, 20), Color(0.5, 0.53, 0.57))
+			draw_rect(Rect2(px - 6, py - 22, 12, 4), Color(0.78, 0.8, 0.82))
+
+	# traffic
+	for v in sim.traffic:
+		_draw_vehicle(v, center_x, player_y)
 
 	# player
-	player_node = _create_motorcycle()
-	player_node.scale = Vector3.ONE * 1.15
-	add_child(player_node)
+	_draw_bike(center_x - (sim.player_x / 4.0) * LANE_PX, player_y)
 
-	# camera
-	camera = Camera3D.new()
-	camera.fov = 60
-	add_child(camera)
-	_update_camera(true)
+	# speed streaks at the edges
+	var speed_ratio := clampf((sim.player_speed - sim.base_speed) / maxf(1.0, sim.max_speed - sim.base_speed), 0.0, 1.0)
+	if speed_ratio > 0.05:
+		var streak_alpha := 0.10 + speed_ratio * 0.22
+		for i in range(7):
+			var sx := center_x - road_half - 22 - (i % 3) * 14
+			var sy := fmod(sim.player_z * PX_PER_M_Z * 1.8 + i * 97.0, view.y)
+			draw_rect(Rect2(sx, sy, 3, 40 + speed_ratio * 50), Color(0.7, 0.9, 1.0, streak_alpha))
+			draw_rect(Rect2(center_x + road_half + 22 + (i % 3) * 14, sy, 3, 40 + speed_ratio * 50), Color(0.7, 0.9, 1.0, streak_alpha))
 
-func _build_road() -> void:
-	for i in range(ROAD_SEGMENT_COUNT):
-		var seg := _create_road_segment()
-		seg.position.z = i * ROAD_SEGMENT_LENGTH
-		road_root.add_child(seg)
-		road_segments.append(seg)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
-## Builds the road surface, markings and guard rails procedurally. The lane
-## markings are painted into a repeating texture rather than modelled, which
-## keeps long stretches of road cheap to draw.
-func _create_road_segment() -> Node3D:
-	var seg := MeshInstance3D.new()
-	var mesh := BoxMesh.new()
-	mesh.size = Vector3(ROAD_WIDTH, 0.2, ROAD_SEGMENT_LENGTH)
-	seg.mesh = mesh
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(1, 1, 1)
-	mat.albedo_texture = _road_texture()
-	mat.uv1_scale = Vector3(1.0, ROAD_SEGMENT_LENGTH / ROAD_TILE_LENGTH, 1.0)
-	seg.material_override = mat
-	seg.position.y = -0.1
+func _draw_vehicle(v: Dictionary, center_x: float, player_y: float) -> void:
+	var vz := float(v.get("z", 0.0))
+	var dy := player_y - (vz - sim.player_z) * PX_PER_M_Z
+	if dy < -260 or dy > get_viewport_rect().size.y + 260:
+		return
+	var lane := int(v.get("lane", 1))
+	var vx := center_x - (sim.lane_center(lane) / 4.0) * LANE_PX
+	var is_truck := String(v.get("type", "car")) == "truck"
+	var length_px := float(v.get("length", 4.5)) * 16.0
+	var width_px := float(v.get("width", 1.8)) * 26.0
+	var color := Color(0.86, 0.2, 0.18) if not is_truck else Color(0.86, 0.58, 0.12)
+	var body := Rect2(vx - width_px * 0.5, dy - length_px * 0.5, width_px, length_px)
+	# soft shadow
+	draw_rect(Rect2(body.position + Vector2(4, 6), body.size), Color(0, 0, 0, 0.28))
+	draw_rect(body, color)
+	draw_rect(Rect2(body.position.x + 3, body.position.y + 3, body.size.x - 6, body.size.y - 6), color.darkened(0.18))
+	# windshield / roof
+	var roof_h := body.size.y * 0.28
+	draw_rect(Rect2(body.position.x + 5, body.position.y + body.size.y * 0.18, body.size.x - 10, roof_h), Color(0.12, 0.18, 0.24))
+	# taillights
+	draw_rect(Rect2(body.position.x + 4, body.end.y - 6, 7, 4), Color(1.0, 0.15, 0.1))
+	draw_rect(Rect2(body.end.x - 11, body.end.y - 6, 7, 4), Color(1.0, 0.15, 0.1))
+	# headlights
+	draw_rect(Rect2(body.position.x + 4, body.position.y + 2, 7, 3), Color(1.0, 0.95, 0.7, 0.8))
+	draw_rect(Rect2(body.end.x - 11, body.position.y + 2, 7, 3), Color(1.0, 0.95, 0.7, 0.8))
 
-	# guard rails along both edges
-	for side in [-1, 1]:
-		var rail := MeshInstance3D.new()
-		var rail_mesh := BoxMesh.new()
-		rail_mesh.size = Vector3(0.12, 0.3, ROAD_SEGMENT_LENGTH)
-		rail.mesh = rail_mesh
-		var rail_material := StandardMaterial3D.new()
-		rail_material.albedo_color = Color(0.72, 0.74, 0.78)
-		rail_material.metallic = 0.6
-		rail_material.roughness = 0.45
-		rail.material_override = rail_material
-		rail.position = Vector3(side * 6.35, 0.55, 0)
-		seg.add_child(rail)
-		# posts
-		for i in range(int(ROAD_SEGMENT_LENGTH / 12.5)):
-			var post := MeshInstance3D.new()
-			var post_mesh := BoxMesh.new()
-			post_mesh.size = Vector3(0.1, 0.9, 0.1)
-			post.mesh = post_mesh
-			var post_material := StandardMaterial3D.new()
-			post_material.albedo_color = Color(0.5, 0.52, 0.55)
-			post.material_override = post_material
-			post.position = Vector3(side * 6.35, 0.3, -ROAD_SEGMENT_LENGTH * 0.5 + 6.0 + i * 12.5)
-			seg.add_child(post)
-	return seg
-
-## Paints one repeating tile of road: asphalt grain, solid white edge lines
-## and dashed yellow lane boundaries, at the exact lane geometry.
-func _road_texture() -> ImageTexture:
-	if road_texture != null:
-		return road_texture
-	var size := 256
-	var image := Image.create_empty(size, size, false, Image.FORMAT_RGB8)
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 20240517
-	for y in range(size):
-		for x in range(size):
-			var u := float(x) / float(size)
-			var v := float(y) / float(size)
-			var grain := rng.randf_range(-0.04, 0.04)
-			var color := Color(0.30 + grain, 0.31 + grain, 0.34 + grain)
-			# solid white edge lines
-			if u < 0.035 or u > 0.965:
-				color = Color(0.92, 0.92, 0.90)
-			# dashed yellow lane boundaries: 3m dash inside a 12m tile
-			var dash := fmod(v * 4.0, 1.0) < 0.25
-			if dash and (u > 0.315 and u < 0.352 or u > 0.648 and u < 0.685):
-				color = Color(0.98, 0.80, 0.14)
-			image.set_pixel(x, y, color)
-	road_texture = ImageTexture.create_from_image(image)
-	return road_texture
-
-func _grass_texture() -> ImageTexture:
-	if grass_texture != null:
-		return grass_texture
-	var size := 128
-	var image := Image.create_empty(size, size, false, Image.FORMAT_RGB8)
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 991
-	for y in range(size):
-		for x in range(size):
-			var n := rng.randf_range(-0.05, 0.05)
-			var patch := sin(float(x) * 0.21) * cos(float(y) * 0.17) * 0.03
-			image.set_pixel(x, y, Color(0.27 + n + patch, 0.44 + n + patch, 0.29 + n + patch))
-	grass_texture = ImageTexture.create_from_image(image)
-	return grass_texture
-
-func _build_trees() -> void:
-	for i in range(22):
-		var t := _create_tree()
-		var side := -1 if i % 2 == 0 else 1
-		t.position = Vector3(side * rng_visual.randf_range(9.0, 16.0), 0, i * 16.0 - 60.0)
-		tree_root.add_child(t)
-		tree_nodes.append(t)
-	# distant scenery that scrolls with the road
-	for i in range(6):
-		var hill := _create_hill()
-		var side := -1 if i % 2 == 0 else 1
-		hill.position = Vector3(side * rng_visual.randf_range(90.0, 220.0), 0, i * 260.0 - 200.0)
-		tree_root.add_child(hill)
-		hill_nodes.append(hill)
-	for i in range(7):
-		var cloud := _create_cloud()
-		cloud.position = Vector3(rng_visual.randf_range(-160.0, 160.0), rng_visual.randf_range(55.0, 95.0), i * 220.0 - 150.0)
-		tree_root.add_child(cloud)
-		cloud_nodes.append(cloud)
-
-func _add_blob_shadow(parent: Node3D, size: Vector2, offset: Vector3 = Vector3.ZERO) -> void:
-	var shadow := MeshInstance3D.new()
-	var plane := PlaneMesh.new()
-	plane.size = size
-	shadow.mesh = plane
-	var material := StandardMaterial3D.new()
-	material.albedo_color = Color(0.05, 0.07, 0.06, 0.5)
-	material.albedo_texture = _blob_shadow_texture()
-	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.cull_mode = BaseMaterial3D.CULL_DISABLED
-	shadow.material_override = material
-	shadow.position = Vector3(offset.x, 0.02, offset.z)
-	shadow.rotation_degrees = Vector3(-90, 0, 0)
-	parent.add_child(shadow)
-
-func _blob_shadow_texture() -> GradientTexture2D:
-	if blob_shadow_texture == null:
-		var gradient := Gradient.new()
-		gradient.set_color(0, Color(0, 0, 0, 0.85))
-		gradient.set_color(1, Color(0, 0, 0, 0))
-		blob_shadow_texture = GradientTexture2D.new()
-		blob_shadow_texture.gradient = gradient
-		blob_shadow_texture.fill = GradientTexture2D.FILL_RADIAL
-		blob_shadow_texture.fill_from = Vector2(0.5, 0.5)
-		blob_shadow_texture.fill_to = Vector2(1.0, 0.5)
-		blob_shadow_texture.width = 64
-		blob_shadow_texture.height = 64
-	return blob_shadow_texture
-
-func _create_tree() -> Node3D:
-	var t := Node3D.new()
-	var trunk := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = 0.16
-	cm.bottom_radius = 0.34
-	cm.height = 2.4
-	cm.radial_segments = 6
-	cm.rings = 1
-	trunk.mesh = cm
-	var tmat := StandardMaterial3D.new()
-	tmat.albedo_color = Color(0.32, 0.21, 0.13)
-	trunk.material_override = tmat
-	trunk.position.y = 1.2
-	t.add_child(trunk)
-	# layered canopy: three overlapping crowns of slightly different greens
-	var crowns := [
-		[Vector3(0, 3.3, 0), 1.75, Color(0.16, 0.42, 0.19)],
-		[Vector3(0.45, 2.75, 0.25), 1.25, Color(0.20, 0.50, 0.22)],
-		[Vector3(-0.4, 2.95, -0.2), 1.1, Color(0.13, 0.36, 0.17)]
-	]
-	for crown in crowns:
-		var foliage := MeshInstance3D.new()
-		var sm := SphereMesh.new()
-		sm.radius = float(crown[1])
-		sm.height = float(crown[1]) * 1.7
-		sm.radial_segments = 7
-		sm.rings = 4
-		foliage.mesh = sm
-		var fmat := StandardMaterial3D.new()
-		fmat.albedo_color = crown[2]
-		foliage.material_override = fmat
-		foliage.position = crown[0]
-		t.add_child(foliage)
-	_add_blob_shadow(t, Vector2(3.8, 3.8), Vector3(0.8, 0, 0.4))
-	return t
-
-## A low, wide mound far out on either side, to break the flat horizon.
-func _create_hill() -> Node3D:
-	var hill := Node3D.new()
-	for i in range(3):
-		var mound := MeshInstance3D.new()
-		var sm := SphereMesh.new()
-		sm.radius = rng_visual.randf_range(40.0, 70.0)
-		sm.height = sm.radius * rng_visual.randf_range(0.5, 0.9)
-		sm.radial_segments = 8
-		sm.rings = 4
-		mound.mesh = sm
-		var material := StandardMaterial3D.new()
-		material.albedo_color = Color(0.14, 0.26, 0.24)
-		mound.material_override = material
-		mound.position = Vector3(rng_visual.randf_range(-25, 25), -sm.height * 0.42, rng_visual.randf_range(-30, 30))
-		hill.add_child(mound)
-	return hill
-
-## A soft cloud puff, drawn high and far away.
-func _create_cloud() -> Node3D:
-	var cloud := Node3D.new()
-	for i in range(4):
-		var puff := MeshInstance3D.new()
-		var sm := SphereMesh.new()
-		sm.radius = rng_visual.randf_range(8.0, 16.0)
-		sm.height = sm.radius * 0.8
-		sm.radial_segments = 7
-		sm.rings = 3
-		puff.mesh = sm
-		var material := StandardMaterial3D.new()
-		material.albedo_color = Color(0.99, 0.99, 1.0)
-		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		material.albedo_color.a = 0.92
-		puff.material_override = material
-		puff.position = Vector3(rng_visual.randf_range(-14, 14), rng_visual.randf_range(-2, 2), rng_visual.randf_range(-8, 8))
-		puff.scale = Vector3(1.0, 0.55, 1.0)
-		cloud.add_child(puff)
-	return cloud
-
-func _make_box(parent: Node3D, size: Vector3, color: Color, position: Vector3, rotation_deg: Vector3 = Vector3.ZERO) -> MeshInstance3D:
-	var node := MeshInstance3D.new()
-	var mesh := BoxMesh.new()
-	mesh.size = size
-	node.mesh = mesh
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	node.material_override = material
-	node.position = position
-	node.rotation_degrees = rotation_deg
-	parent.add_child(node)
-	return node
-
-func _create_motorcycle() -> Node3D:
-	var root := Node3D.new()
-	var paint := Color(0.09, 0.42, 0.72)
-	var dark := Color(0.09, 0.10, 0.12)
-	var metal := Color(0.62, 0.65, 0.68)
-
-	# wheels: front wheel slightly larger and further forward
-	for wz in [-0.72, 0.78]:
-		var wheel := MeshInstance3D.new()
-		var wm := CylinderMesh.new()
-		wm.top_radius = 0.36
-		wm.bottom_radius = 0.36
-		wm.height = 0.18
-		wm.radial_segments = 12
-		wm.rings = 1
-		wheel.mesh = wm
-		var wmat := StandardMaterial3D.new()
-		wmat.albedo_color = dark
-		wheel.material_override = wmat
-		wheel.rotation_degrees = Vector3(0, 0, 90)
-		wheel.position = Vector3(0, 0.36, wz)
-		root.add_child(wheel)
-		# hub
-		_make_box(root, Vector3(0.2, 0.1, 0.1), metal, Vector3(0, 0.36, wz))
-
-	# engine and frame block, tapering toward the tank
-	_make_box(root, Vector3(0.42, 0.42, 1.0), dark, Vector3(0, 0.52, -0.05))
-	_make_box(root, Vector3(0.5, 0.34, 0.62), paint, Vector3(0, 0.72, 0.18))
-	# fuel tank
-	_make_box(root, Vector3(0.44, 0.28, 0.7), paint, Vector3(0, 0.92, 0.18), Vector3(-6, 0, 0))
-	# seat
-	_make_box(root, Vector3(0.36, 0.12, 0.66), dark, Vector3(0, 0.98, -0.34), Vector3(3, 0, 0))
-	# tail
-	_make_box(root, Vector3(0.3, 0.22, 0.3), paint, Vector3(0, 0.96, -0.72), Vector3(12, 0, 0))
-	# front fairing
-	_make_box(root, Vector3(0.36, 0.52, 0.28), paint, Vector3(0, 0.92, 0.66), Vector3(-24, 0, 0))
-	# forks
-	for side in [-1, 1]:
-		_make_box(root, Vector3(0.07, 0.62, 0.07), metal, Vector3(side * 0.13, 0.62, 0.72), Vector3(-20, 0, 0))
-	# handlebars
-	_make_box(root, Vector3(0.66, 0.07, 0.07), metal, Vector3(0, 1.16, 0.56))
-	# exhaust
-	_make_box(root, Vector3(0.12, 0.12, 0.8), metal, Vector3(0.2, 0.38, -0.3), Vector3(0, 0, 0))
-
-	# rider: torso leaning forward over the tank
-	var rider := MeshInstance3D.new()
-	var rm := CapsuleMesh.new()
-	rm.radius = 0.24
-	rm.height = 0.86
-	rm.radial_segments = 8
-	rm.rings = 2
-	rider.mesh = rm
-	var rmat := StandardMaterial3D.new()
-	rmat.albedo_color = Color(0.78, 0.22, 0.18)
-	rider.material_override = rmat
-	rider.position = Vector3(0, 1.32, -0.02)
-	rider.rotation_degrees = Vector3(-38, 0, 0)
-	root.add_child(rider)
-	# arms reaching the bars
-	for side in [-1, 1]:
-		_make_box(root, Vector3(0.12, 0.12, 0.62), rmat.albedo_color, Vector3(side * 0.2, 1.24, 0.3), Vector3(-26, 0, 0))
-	# legs
-	for side in [-1, 1]:
-		_make_box(root, Vector3(0.16, 0.16, 0.5), dark, Vector3(side * 0.16, 0.78, -0.18), Vector3(24, 0, 0))
-	# helmet with a dark visor
-	var head := MeshInstance3D.new()
-	var hm := SphereMesh.new()
-	hm.radius = 0.21
-	hm.height = 0.42
-	hm.radial_segments = 10
-	hm.rings = 5
-	head.mesh = hm
-	var hmat := StandardMaterial3D.new()
-	hmat.albedo_color = Color(0.95, 0.93, 0.88)
-	head.material_override = hmat
-	head.position = Vector3(0, 1.62, 0.2)
-	root.add_child(head)
-	_make_box(root, Vector3(0.34, 0.12, 0.06), Color(0.06, 0.07, 0.09), Vector3(0, 1.62, 0.38))
-
-	_add_blob_shadow(root, Vector2(1.1, 2.2))
-	tail_light = MeshInstance3D.new()
-	var light_mesh := BoxMesh.new()
-	light_mesh.size = Vector3(0.26, 0.12, 0.06)
-	tail_light.mesh = light_mesh
-	var light_material := StandardMaterial3D.new()
-	light_material.albedo_color = Color(0.85, 0.08, 0.05)
-	light_material.emission_enabled = true
-	light_material.emission = Color(0.7, 0.02, 0.01)
-	tail_light.material_override = light_material
-	tail_light.position = Vector3(0, 0.99, -0.87)
-	root.add_child(tail_light)
-	return root
-
-func _create_car(color: Color, is_truck: bool) -> Node3D:
-	var root := Node3D.new()
-	var length := 4.5 if not is_truck else 7.0
-	var height := 0.7 if not is_truck else 1.2
-	var body := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = Vector3(1.8, height, length)
-	body.mesh = bm
-	var bmat := StandardMaterial3D.new()
-	bmat.albedo_color = color
-	body.material_override = bmat
-	body.position.y = height * 0.5 + 0.2
-	root.add_child(body)
-	# cabin
-	var cabin := MeshInstance3D.new()
-	var cm := BoxMesh.new()
-	cm.size = Vector3(1.6, 0.6, length * 0.5)
-	cabin.mesh = cm
-	var cmat := StandardMaterial3D.new()
-	cmat.albedo_color = color.darkened(0.2)
-	cabin.material_override = cmat
-	cabin.position = Vector3(0, height + 0.5, -length * 0.1)
-	root.add_child(cabin)
+func _draw_bike(bx: float, by: float) -> void:
+	var lean := clampf(-sim.player_velocity_x * 0.035, -0.35, 0.35)
+	# shadow, drawn without lean so it stays under the bike
+	draw_set_transform(Vector2(bx + 4, by + 8) + shake_offset, 0.0, Vector2.ONE)
+	draw_rect(Rect2(-17, -44, 34, 88), Color(0, 0, 0, 0.28))
+	draw_set_transform(Vector2(bx, by) + shake_offset, lean, Vector2.ONE)
 	# wheels
-	for wz in [-length*0.35, length*0.35]:
-		for sx in [-0.85, 0.85]:
-			var w := MeshInstance3D.new()
-			var wm := CylinderMesh.new()
-			wm.top_radius = 0.3
-			wm.bottom_radius = 0.3
-			wm.height = 0.2
-			w.mesh = wm
-			w.rotation_degrees = Vector3(0, 0, 90)
-			w.position = Vector3(sx, 0.3, wz)
-			var wmat := StandardMaterial3D.new()
-			wmat.albedo_color = Color(0.05, 0.05, 0.05)
-			w.material_override = wmat
-			root.add_child(w)
-	_add_blob_shadow(root, Vector2(2.2, 5.0 if not is_truck else 7.2))
-	return root
+	draw_rect(Rect2(-6, -44, 12, 24), Color(0.05, 0.05, 0.06))
+	draw_rect(Rect2(-6, 20, 12, 24), Color(0.05, 0.05, 0.06))
+	draw_rect(Rect2(-6, -42, 12, 4), Color(0.28, 0.3, 0.33))
+	draw_rect(Rect2(-6, 38, 12, 4), Color(0.28, 0.3, 0.33))
+	# frame and tank
+	draw_rect(Rect2(-10, -20, 20, 46), Color(0.12, 0.45, 0.72))
+	draw_rect(Rect2(-9, -8, 18, 20), Color(0.84, 0.2, 0.15))
+	draw_rect(Rect2(-7, -6, 14, 5), Color(1.0, 0.45, 0.3, 0.6))
+	# handlebars
+	draw_rect(Rect2(-22, -26, 44, 5), Color(0.65, 0.68, 0.72))
+	# rider
+	draw_circle(Vector2(0, 2), 13, Color(0.14, 0.16, 0.2))
+	draw_circle(Vector2(0, -13), 10, Color(0.9, 0.9, 0.88))
+	draw_rect(Rect2(-7, -16, 14, 4), Color(0.15, 0.55, 0.75))
+	# headlight
+	draw_rect(Rect2(-5, -46, 10, 4), Color(1.0, 0.95, 0.65))
+	if sim.braking:
+		draw_circle(Vector2(0, 44), 7, Color(1.0, 0.1, 0.05, 0.9))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+# ---------------------------------------------------------------------------
+# UI
+# ---------------------------------------------------------------------------
 
 func _build_ui() -> void:
 	ui_layer = CanvasLayer.new()
@@ -675,7 +357,6 @@ func _build_ui() -> void:
 	ui_theme.set_stylebox("pressed", "Button", button_pressed)
 	hud.theme = ui_theme
 
-	# compact glass stats bar
 	var top_panel := PanelContainer.new()
 	top_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	top_panel.offset_left = 20
@@ -724,10 +405,11 @@ func _build_ui() -> void:
 	hud.add_child(conn_label)
 
 	msg_label = Label.new()
-	msg_label.text = "A / LEFT ARROW: MOVE LEFT     D / RIGHT ARROW: MOVE RIGHT     SPACE / DOWN: BRAKE     T: SWITCH CONTROL     ESC: PAUSE"
+	msg_label.text = "A / LEFT: MOVE LEFT     D / RIGHT: MOVE RIGHT     SPACE / DOWN: BRAKE     T: SWITCH CONTROL     ESC: PAUSE     F9: RECORD"
 	msg_label.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	msg_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hud.add_child(msg_label)
+
 	notice_label = Label.new()
 	notice_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	notice_label.offset_top = 72
@@ -738,16 +420,13 @@ func _build_ui() -> void:
 	notice_label.visible = false
 	hud.add_child(notice_label)
 
-	# menu panel
-	menu_panel = _make_panel("LANESHIFT", ["Start", "Open Logs", "Quit"])
+	menu_panel = _make_panel("LANESHIFT 2D", ["Start", "Open Logs", "Quit"])
 	menu_panel.theme = ui_theme
 	ui_layer.add_child(menu_panel)
-	# pause panel
 	pause_panel = _make_panel("PAUSED", ["Resume", "Restart", "Menu"])
 	pause_panel.theme = ui_theme
 	pause_panel.visible = false
 	ui_layer.add_child(pause_panel)
-	# gameover panel
 	gameover_panel = _make_panel("GAME OVER", ["Restart", "Menu"])
 	gameover_panel.theme = ui_theme
 	gameover_panel.visible = false
@@ -759,7 +438,6 @@ func _build_ui() -> void:
 		gameover_result_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		(gameover_panel.get_child(0) as VBoxContainer).add_child(gameover_result_label)
 
-	# wire buttons
 	_wire_menu()
 
 func _make_panel(title: String, buttons: Array) -> Control:
@@ -784,7 +462,7 @@ func _make_panel(title: String, buttons: Array) -> Control:
 	t.add_theme_color_override("font_color", Color(0.25, 0.91, 0.94))
 	t.add_theme_font_size_override("font_size", 28)
 	vbox.add_child(t)
-	if title == "LANESHIFT":
+	if title == "LANESHIFT 2D":
 		var tagline := Label.new()
 		tagline.text = "THREE LANES. NO SECOND CHANCES."
 		tagline.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -806,9 +484,6 @@ func _make_panel(title: String, buttons: Array) -> Control:
 	return panel
 
 func _wire_menu() -> void:
-	# menu
-	var start_btn := menu_panel.get_node("VBoxContainer/Start") if menu_panel.has_node("VBoxContainer/Start") else null
-	# nodes are direct children of panel? We added vbox as child; button parent is vbox. Find by name recursively.
 	for btn in _find_buttons(menu_panel):
 		btn.pressed.connect(func(): _on_menu_button(btn.text))
 	for btn in _find_buttons(pause_panel):
@@ -828,7 +503,7 @@ func _on_menu_button(text: String) -> void:
 	if text == "Start":
 		start_game()
 	elif text == "Open Logs":
-		var runs_path := ProjectSettings.globalize_path("user://runs")
+		var runs_path := PortablePathsScript.get_recordings_root()
 		DirAccess.make_dir_recursive_absolute(runs_path)
 		OS.shell_open(runs_path)
 	elif text == "Quit":
@@ -886,12 +561,9 @@ func start_game(seed: int = -1, cfg: Dictionary = {}, requested_episode_id: Stri
 	pause_panel.visible = false
 	gameover_panel.visible = false
 	state = "playing"
-	player_node.visible = true
-	_reset_world_positions()
-	_reset_traffic_nodes()
-	_update_camera(true)
 	telemetry_timer = 0.0
 	decision_timer = 0.0
+	queue_redraw()
 
 func restart_game() -> void:
 	start_game(rng_visual.randi())
@@ -904,6 +576,7 @@ func go_menu() -> void:
 	menu_panel.visible = true
 	pause_panel.visible = false
 	gameover_panel.visible = false
+	queue_redraw()
 
 func _on_crashed(_eid: String) -> void:
 	shake_timer = 0.6
@@ -1057,8 +730,6 @@ func _remember_decision_state(snapshot: Dictionary) -> void:
 	if tick < 0 or snapshot.get("episode_id", "") != sim.episode_id:
 		return
 	decision_state_history[tick] = snapshot.duplicate(true)
-	# Retain by age, not by count: a slow model may answer long after the
-	# state it saw, and that exact snapshot must still be available.
 	var oldest_kept := tick - int(decision_state_history_seconds * 60.0)
 	for stored_tick in decision_state_history.keys():
 		if int(stored_tick) < oldest_kept:
@@ -1092,10 +763,10 @@ func _physics_process(delta: float) -> void:
 	if notice_timer > 0.0:
 		notice_timer = max(0.0, notice_timer - delta)
 		notice_label.visible = notice_timer > 0.0
-	# camera shake decay
 	if shake_timer > 0:
 		shake_timer -= delta
-	# input handling
+		if shake_timer <= 0:
+			shake_offset = Vector2.ZERO
 	if state == "playing":
 		_handle_human_input(delta)
 		if external_control and not auto_run and Time.get_ticks_msec() - last_external_action_msec > external_timeout_msec:
@@ -1105,12 +776,10 @@ func _physics_process(delta: float) -> void:
 			_submit_action("STAY", 0.1, "human", "human")
 		sim.step(delta)
 		_log_score_milestones(sim.score)
-		_sync_traffic_nodes()
-		_update_camera(false)
 		if sim.status != "running":
 			_update_hud()
+			queue_redraw()
 			return
-		# telemetry (only while recording)
 		if recording_active:
 			telemetry_timer += delta
 			if telemetry_timer >= 1.0 / telemetry_hz:
@@ -1120,7 +789,6 @@ func _physics_process(delta: float) -> void:
 				snap["wall_time_monotonic_msec"] = Time.get_ticks_msec()
 				if telemetry != null:
 					telemetry.log_telemetry(snap)
-		# decision/net send
 		decision_timer += delta
 		if decision_timer >= 1.0 / decision_hz:
 			decision_timer = 0.0
@@ -1130,17 +798,12 @@ func _physics_process(delta: float) -> void:
 			_remember_decision_state(snap2)
 			net.update_state(snap2)
 			net.send_state(snap2)
-		# check crash handled by signal
 		_update_hud()
-	# auto shake
-	if shake_timer > 0:
-		camera.position += Vector3(randf_range(-shake_intensity, shake_intensity), randf_range(-shake_intensity, shake_intensity), 0) * 0.1
+	queue_redraw()
 
-func _handle_human_input(delta: float) -> void:
+func _handle_human_input(_delta: float) -> void:
 	if external_control:
 		return
-	# Brake is a held action, so it is polled; steering is handled by _input
-	# so a press is acted on immediately instead of waiting for a poll.
 	var brake_now := Input.is_key_pressed(KEY_SPACE) or Input.is_key_pressed(KEY_DOWN)
 	if brake_now:
 		if not brake_held:
@@ -1163,10 +826,9 @@ func _input(event: InputEvent) -> void:
 			KEY_D, KEY_RIGHT:
 				_submit_action("RIGHT", 0.2, "human", "human")
 
-func _process(delta: float) -> void:
+func _process(_delta: float) -> void:
 	if _key_just_pressed(KEY_F9):
 		_toggle_recording()
-	# pause toggle
 	if Input.is_action_just_pressed("ui_cancel"):
 		if state == "playing":
 			pause_game()
@@ -1186,8 +848,6 @@ func _process(delta: float) -> void:
 				_log_event("control_mode_changed", {"control_mode": "external"})
 			else:
 				_log_event("control_mode_change_rejected", {"requested_control_mode": "external", "reason": "controller_disconnected"})
-	# net poll already in NetBridge._process
-	# update conn label occasionally
 	conn_label.text = "WS: " + ("connected" if net.connected_flag else "disconnected")
 	_update_record_ui()
 	if recording_active and record_status_label != null:
@@ -1200,9 +860,10 @@ func _process(delta: float) -> void:
 		record_status_label.text = "REC %.1fs  samples:%d events:%d" % [elapsed, samples, events]
 	if state == "menu":
 		menu_panel.visible = true
+	if shake_timer > 0.0:
+		shake_offset = Vector2(randf_range(-shake_intensity, shake_intensity), randf_range(-shake_intensity, shake_intensity)) * 4.0
 
 func _key_just_pressed(key: int) -> bool:
-	# fallback edge detection
 	if not has_meta("keys_prev"):
 		set_meta("keys_prev", {})
 	var d: Dictionary = get_meta("keys_prev")
@@ -1227,95 +888,6 @@ func resume_game() -> void:
 	state = "playing"
 	get_tree().paused = false
 	pause_panel.visible = false
-
-func _reset_traffic_nodes() -> void:
-	for c in traffic_root.get_children():
-		c.queue_free()
-	traffic_nodes.clear()
-
-func _sync_traffic_nodes() -> void:
-	# remove stale
-	var current_ids := {}
-	for v in sim.traffic:
-		current_ids[v["id"]] = true
-	for id in traffic_nodes.keys():
-		if not current_ids.has(id):
-			var n = traffic_nodes[id]
-			if is_instance_valid(n):
-				n.queue_free()
-			traffic_nodes.erase(id)
-	# add new
-	for v in sim.traffic:
-		if not traffic_nodes.has(v["id"]):
-			var is_truck: bool = v["type"] == "truck"
-			var color := Color(0.8, 0.2, 0.2) if not is_truck else Color(0.9, 0.6, 0.1)
-			var node := _create_car(color, is_truck)
-			traffic_root.add_child(node)
-			traffic_nodes[v["id"]] = node
-		var node = traffic_nodes[v["id"]]
-		node.position = Vector3(sim.lane_center(int(v["lane"])), 0, v["z"])
-	# update player
-	player_node.position = Vector3(sim.player_x, 0, sim.player_z)
-	player_node.rotation_degrees.y = 0
-	player_node.rotation_degrees.z = clampf(-sim.player_velocity_x * 2.4, -24.0, 24.0)
-	var brake_material := tail_light.material_override as StandardMaterial3D
-	brake_material.albedo_color = Color(1.0, 0.08, 0.03) if sim.braking else Color(0.4, 0.03, 0.02)
-	brake_material.emission = Color(1.0, 0.02, 0.01) if sim.braking else Color(0.25, 0.01, 0.0)
-	# recycle road
-	_recycle_road()
-	_recycle_trees()
-	_recycle_ground()
-
-func _recycle_ground() -> void:
-	for ground in ground_segments:
-		while ground.position.z + GROUND_SEGMENT_LENGTH * 0.5 < sim.player_z - GROUND_RECYCLE_MARGIN:
-			ground.position.z += GROUND_SEGMENT_LENGTH * GROUND_SEGMENT_COUNT
-
-func _recycle_road() -> void:
-	for seg in road_segments:
-		while seg.position.z < sim.player_z - 30:
-			seg.position.z += ROAD_SEGMENT_COUNT * ROAD_SEGMENT_LENGTH
-
-## Puts the whole world back around the origin. A reset drops the player to
-## z=0, so without this the road and scenery stay where the last episode
-## ended and the player would start on bare ground.
-func _reset_world_positions() -> void:
-	for i in range(road_segments.size()):
-		road_segments[i].position.z = i * ROAD_SEGMENT_LENGTH
-	for i in range(ground_segments.size()):
-		ground_segments[i].position.z = 120.0 + i * GROUND_SEGMENT_LENGTH
-	for i in range(tree_nodes.size()):
-		var side := -1 if i % 2 == 0 else 1
-		tree_nodes[i].position = Vector3(side * rng_visual.randf_range(9.0, 16.0), 0, i * 16.0 - 60.0)
-	for i in range(hill_nodes.size()):
-		var hside := -1 if i % 2 == 0 else 1
-		hill_nodes[i].position = Vector3(hside * rng_visual.randf_range(90.0, 220.0), 0, i * 260.0 - 200.0)
-	for i in range(cloud_nodes.size()):
-		cloud_nodes[i].position = Vector3(rng_visual.randf_range(-160.0, 160.0), rng_visual.randf_range(55.0, 95.0), i * 220.0 - 150.0)
-
-func _recycle_trees() -> void:
-	for t in tree_nodes:
-		while t.position.z < sim.player_z - 60:
-			t.position.z += 22 * 16.0
-	for hill in hill_nodes:
-		while hill.position.z < sim.player_z - 400:
-			hill.position.z += 6 * 260.0
-	for cloud in cloud_nodes:
-		while cloud.position.z < sim.player_z - 300:
-			cloud.position.z += 7 * 220.0
-
-func _update_camera(force: bool) -> void:
-	var target := Vector3(sim.player_x, 0, sim.player_z)
-	var cam_pos := target + Vector3(0, 3.5, -5.6)
-	if force:
-		camera.position = cam_pos
-	else:
-		camera.position = camera.position.lerp(cam_pos, 0.12)
-	camera.look_at(target + Vector3(0, 1.0, 10.5), Vector3.UP)
-	# widen the view with speed: cheap, and it reads as acceleration
-	var speed_ratio := clampf((sim.player_speed - sim.base_speed) / maxf(1.0, sim.max_speed - sim.base_speed), 0.0, 1.0)
-	var target_fov := 60.0 + speed_ratio * 9.0
-	camera.fov = lerpf(camera.fov, target_fov, 0.06 if not force else 1.0)
 
 func _toggle_recording() -> void:
 	if recording_active:
@@ -1437,7 +1009,6 @@ func _start_auto_run() -> void:
 	auto_total_episodes = auto_seeds.size() * auto_episodes_per_seed
 	if auto_max_episodes > 0:
 		auto_total_episodes = min(auto_total_episodes, auto_max_episodes)
-	# start first
 	_auto_start_next()
 
 func _auto_start_next() -> void:

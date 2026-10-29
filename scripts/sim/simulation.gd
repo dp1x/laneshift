@@ -93,7 +93,7 @@ func reset(scenario_seed: int, cfg: Dictionary = {}, requested_episode_id: Strin
 	status = "running"
 	run_counter += 1
 	episode_id = requested_episode_id if requested_episode_id != "" else "ep_%d_%d" % [scenario_seed, run_counter]
-	next_spawn_z = player_z + 75.0
+	next_spawn_z = player_z + 45.0
 	_spawn_initial()
 	emit_signal("scenario_initialized", {
 		"seed": scenario_seed,
@@ -109,7 +109,7 @@ func _spawn_initial() -> void:
 	for i in range(n):
 		# The first vehicle is kept out of the player's lane so every episode
 		# opens with a readable road rather than an unavoidable collision.
-		var z := player_z + 75.0 + i * 34.0
+		var z := player_z + 30.0 + i * 18.0
 		_spawn_vehicle(z, player_lane if i == 0 else -1)
 
 ## Spawns a vehicle. `avoid_lane` is skipped when set.
@@ -176,7 +176,7 @@ func step(delta: float) -> void:
 	var density := float(config.get("traffic_density", 1.0))
 	var interval_min := float(config.get("spawn_interval_min", 22.0))
 	var interval_max := float(config.get("spawn_interval_max", 38.0))
-	var lead := 150.0
+	var lead := 75.0
 	while next_spawn_z < player_z + lead:
 		_spawn_vehicle(next_spawn_z)
 		var iv: float = rng.randf_range(interval_min, interval_max) / max(0.1, density)
