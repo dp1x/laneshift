@@ -85,6 +85,14 @@ func _run() -> void:
 	_check(game.state == "playing" and not game.pause_panel.visible, "resume should restore gameplay")
 	_check(_has_event(game.telemetry.events_buffer, "resume", -1), "resume transition should be logged")
 
+	game.take_control_on_start = true
+	game.net.connected_flag = true
+	game.start_game(999, {"episode_duration": 0.1})
+	game._process(0.016)
+	_check(game.external_control, "take-control-on-start should hand control to a connected controller")
+	game.external_control = false
+	game.take_control_on_start = false
+
 	game.sim.player_x = game.sim.lane_center(game.sim.player_lane)
 	game.sim.traffic = [{"id": "forced-crash", "lane": game.sim.player_lane, "z": game.sim.player_z + 0.1, "speed": 0.0, "type": "car", "length": 4.5, "width": 1.8}]
 	game.sim.step(1.0 / 60.0)
