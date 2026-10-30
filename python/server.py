@@ -21,7 +21,6 @@ import httpx
 from policy import PolicyDecision
 from policies.dummy import DummyPolicy
 from policies.model_adapter import KevInferenceError, KevSystemOnePolicy
-from policies.onnx_kev import OnnxKevPolicy
 from policies.rule_based import RuleBasedPolicy
 
 PROTOCOL_VERSION = 1
@@ -89,6 +88,8 @@ def load_policy(name, model_configs=None, http_client=None, onnx_config=None):
     if name == "rule_based":
         return RuleBasedPolicy()
     if name == "onnx_kev":
+        from policies.onnx_kev import OnnxKevPolicy
+
         config = onnx_config or {}
         model_path = str(config.get("model_path", "") or "")
         tokenizer_path = str(config.get("tokenizer_path", "") or "")
