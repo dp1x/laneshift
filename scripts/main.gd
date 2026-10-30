@@ -60,6 +60,7 @@ var external_control: bool = false
 
 var auto_run: bool = false
 var record_on_start: bool = false
+var take_control_on_start: bool = false
 var auto_seeds: Array = [1, 2, 3]
 var auto_episodes_per_seed: int = 1
 var auto_episode_index: int = 0
@@ -132,6 +133,7 @@ func _parse_args() -> void:
 	var options := parse_options(args)
 	auto_run = bool(options["auto_run"])
 	record_on_start = bool(options["record_on_start"])
+	take_control_on_start = bool(options["take_control_on_start"])
 	auto_seeds = options["seeds"]
 	auto_episodes_per_seed = int(options["episodes"])
 	auto_max_episodes = int(options["max_episodes"])
@@ -149,6 +151,7 @@ static func parse_options(args: PackedStringArray) -> Dictionary:
 	var options := {
 		"auto_run": false,
 		"record_on_start": false,
+		"take_control_on_start": false,
 		"seeds": [],
 		"episodes": 1,
 		"max_episodes": 0,
@@ -165,6 +168,9 @@ static func parse_options(args: PackedStringArray) -> Dictionary:
 			continue
 		if arg == "--record-on-start":
 			options["record_on_start"] = true
+			continue
+		if arg == "--take-control-on-start":
+			options["take_control_on_start"] = true
 			continue
 		var split := arg.split("=", true, 1)
 		if split.size() != 2:
@@ -857,6 +863,13 @@ func _process(_delta: float) -> void:
 			else:
 				_log_event("control_mode_change_rejected", {"requested_control_mode": "external", "reason": "controller_disconnected"})
 	conn_label.text = "WS: " + ("connected" if net.connected_flag else "disconnected")
+	if state == "playing" and take_control_on_start and net.connected_flag and not external_control:
+		external_control = true
+		control_mode = "external"
+		last_external_action_msec = Time.get_ticks_msec()
+		sim.control_source = "external_ai"
+		take_control_on_start = false
+		_log_event("control_mode_changed", {"control_mode": "external", "reason": "take_control_on_start"})
 	_update_record_ui()
 	if recording_active and record_status_label != null:
 		var elapsed := float(Time.get_ticks_msec() - recording_start_msec) / 1000.0
