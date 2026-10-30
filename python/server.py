@@ -21,6 +21,7 @@ import httpx
 from policy import PolicyDecision
 from policies.dummy import DummyPolicy
 from policies.model_adapter import KevInferenceError, KevSystemOnePolicy
+from policies.onnx_kev import OnnxKevPolicy
 from policies.rule_based import RuleBasedPolicy
 
 PROTOCOL_VERSION = 1
@@ -28,6 +29,7 @@ ALLOWED_ACTIONS = frozenset({"LEFT", "STAY", "RIGHT", "BRAKE"})
 POLICY_SOURCES = {
     "dummy": "synthetic",
     "rule_based": "rule_based",
+    "onnx_kev": "original_model",
 }
 
 
@@ -81,11 +83,23 @@ def make_action_message(state, seq, action, duration=0.35, label_source="externa
     }
 
 
-def load_policy(name, model_configs=None, http_client=None):
+def load_policy(name, model_configs=None, http_client=None, onnx_config=None):
     if name == "dummy":
         return DummyPolicy()
     if name == "rule_based":
         return RuleBasedPolicy()
+    if name == "onnx_kev":
+        config = onnx_config or {}
+        model_path = str(config.get("model_path", "") or "")
+        tokenizer_path = str(config.get("tokenizer_path", "") or "")
+        if not model_path or not tokenizer_path:
+            raise ValueError("onnx_kev requires --onnx-model and --onnx-tokenizer")
+        return OnnxKevPolicy(
+            model_path,
+            tokenizer_path,
+            length=int(config.get("length", 256)),
+            intra_threads=int(config.get("threads", 0)) or None,
+        )
     config = (model_configs or {}).get(name)
     if config is None:
         raise ValueError(
@@ -104,11 +118,12 @@ class ControllerServer:
         expected_episodes=0,
         model_configs=None,
         http_client=None,
+        onnx_config=None,
         decision_timeout=0.4,
         max_state_age_s=0.4,
     ):
         self.policy_name = policy_name
-        self.policy = load_policy(policy_name, model_configs, http_client)
+        self.policy = load_policy(policy_name, model_configs, http_client, onnx_config)
         self.duration = duration
         self.expected_episodes = expected_episodes
         self.decision_timeout = decision_timeout
@@ -406,12 +421,19 @@ async def run_server(args):
             "api_key_env": args.kev_api_key_env,
         }
     async with httpx.AsyncClient(trust_env=False) as http_client:
+        onnx_config = {
+            "model_path": args.onnx_model,
+            "tokenizer_path": args.onnx_tokenizer,
+            "length": args.onnx_length,
+            "threads": args.onnx_threads,
+        }
         server = ControllerServer(
             args.policy,
             args.duration,
             args.expected_episodes,
             model_configs=model_configs,
             http_client=http_client,
+            onnx_config=onnx_config,
             decision_timeout=args.decision_timeout,
             max_state_age_s=args.max_state_age,
         )
@@ -460,6 +482,14 @@ def parse_args(argv=None):
     parser.add_argument("--kev-label-source", choices=("original_model", "fine_tuned_model"))
     parser.add_argument("--kev-api-key-env", default="KEV_API_KEY")
     parser.add_argument("--inference-timeout", type=float, default=0.4)
+    parser.add_argument("--onnx-model", default=os.getenv("LANESHIFT_ONNX_MODEL", ""),
+                        help="path to the exported Kev ONNX graph")
+    parser.add_argument("--onnx-tokenizer", default=os.getenv("LANESHIFT_ONNX_TOKENIZER", ""),
+                        help="path to the Qwen tokenizer.json")
+    parser.add_argument("--onnx-length", type=int, default=int(os.getenv("LANESHIFT_ONNX_LENGTH", "256")),
+                        help="fixed sequence length baked into the exported graph")
+    parser.add_argument("--onnx-threads", type=int, default=int(os.getenv("LANESHIFT_ONNX_THREADS", "0")),
+                        help="onnxruntime intra-op threads (0 = all cores)")
     return parser.parse_args(argv)
 
 

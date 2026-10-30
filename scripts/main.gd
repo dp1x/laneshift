@@ -59,6 +59,7 @@ var control_mode: String = "human" # human, auto
 var external_control: bool = false
 
 var auto_run: bool = false
+var record_on_start: bool = false
 var auto_seeds: Array = [1, 2, 3]
 var auto_episodes_per_seed: int = 1
 var auto_episode_index: int = 0
@@ -120,6 +121,8 @@ func _ready() -> void:
 	net.disconnected.connect(_on_net_disconnected)
 	if auto_run:
 		_start_auto_run()
+	elif record_on_start:
+		start_recording()
 	queue_redraw()
 
 func _parse_args() -> void:
@@ -128,6 +131,7 @@ func _parse_args() -> void:
 		args = OS.get_cmdline_args()
 	var options := parse_options(args)
 	auto_run = bool(options["auto_run"])
+	record_on_start = bool(options["record_on_start"])
 	auto_seeds = options["seeds"]
 	auto_episodes_per_seed = int(options["episodes"])
 	auto_max_episodes = int(options["max_episodes"])
@@ -144,6 +148,7 @@ func _parse_args() -> void:
 static func parse_options(args: PackedStringArray) -> Dictionary:
 	var options := {
 		"auto_run": false,
+		"record_on_start": false,
 		"seeds": [],
 		"episodes": 1,
 		"max_episodes": 0,
@@ -157,6 +162,9 @@ static func parse_options(args: PackedStringArray) -> Dictionary:
 	for arg in args:
 		if arg == "--auto-run":
 			options["auto_run"] = true
+			continue
+		if arg == "--record-on-start":
+			options["record_on_start"] = true
 			continue
 		var split := arg.split("=", true, 1)
 		if split.size() != 2:
