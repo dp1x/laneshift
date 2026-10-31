@@ -29,6 +29,7 @@ POLICY_SOURCES = {
     "dummy": "synthetic",
     "rule_based": "rule_based",
     "onnx_kev": "original_model",
+    "openrouter_decisions": "external_ai",
 }
 
 
@@ -82,11 +83,17 @@ def make_action_message(state, seq, action, duration=0.35, label_source="externa
     }
 
 
-def load_policy(name, model_configs=None, http_client=None, onnx_config=None):
+def load_policy(name, model_configs=None, http_client=None, onnx_config=None, decisions_config=None):
     if name == "dummy":
         return DummyPolicy()
     if name == "rule_based":
         return RuleBasedPolicy()
+    if name == "openrouter_decisions":
+        from policies.openrouter_decisions import OpenRouterDecisionPolicy
+
+        if http_client is None:
+            raise ValueError("openrouter_decisions requires an HTTP client")
+        return OpenRouterDecisionPolicy(http_client, decisions_config or {})
     if name == "onnx_kev":
         from policies.onnx_kev import OnnxKevPolicy
 
@@ -100,6 +107,7 @@ def load_policy(name, model_configs=None, http_client=None, onnx_config=None):
             tokenizer_path,
             length=int(config.get("length", 256)),
             intra_threads=int(config.get("threads", 0)) or None,
+            data_path=str(config.get("data_path", "") or "") or None,
         )
     config = (model_configs or {}).get(name)
     if config is None:
@@ -120,11 +128,12 @@ class ControllerServer:
         model_configs=None,
         http_client=None,
         onnx_config=None,
+        decisions_config=None,
         decision_timeout=0.4,
         max_state_age_s=0.4,
     ):
         self.policy_name = policy_name
-        self.policy = load_policy(policy_name, model_configs, http_client, onnx_config)
+        self.policy = load_policy(policy_name, model_configs, http_client, onnx_config, decisions_config)
         self.duration = duration
         self.expected_episodes = expected_episodes
         self.decision_timeout = decision_timeout
@@ -425,8 +434,15 @@ async def run_server(args):
         onnx_config = {
             "model_path": args.onnx_model,
             "tokenizer_path": args.onnx_tokenizer,
+            "data_path": args.onnx_data,
             "length": args.onnx_length,
             "threads": args.onnx_threads,
+        }
+        decisions_config = {
+            "url": args.decisions_url,
+            "model": args.decisions_model,
+            "key_env": args.decisions_key_env,
+            "timeout": args.decisions_timeout,
         }
         server = ControllerServer(
             args.policy,
@@ -435,6 +451,7 @@ async def run_server(args):
             model_configs=model_configs,
             http_client=http_client,
             onnx_config=onnx_config,
+            decisions_config=decisions_config,
             decision_timeout=args.decision_timeout,
             max_state_age_s=args.max_state_age,
         )
@@ -487,10 +504,16 @@ def parse_args(argv=None):
                         help="path to the exported Kev ONNX graph")
     parser.add_argument("--onnx-tokenizer", default=os.getenv("LANESHIFT_ONNX_TOKENIZER", ""),
                         help="path to the Qwen tokenizer.json")
+    parser.add_argument("--onnx-data", default=os.getenv("LANESHIFT_ONNX_DATA", ""),
+                        help="optional path to the shared kev07b_fp16.data blob")
     parser.add_argument("--onnx-length", type=int, default=int(os.getenv("LANESHIFT_ONNX_LENGTH", "256")),
                         help="fixed sequence length baked into the exported graph")
     parser.add_argument("--onnx-threads", type=int, default=int(os.getenv("LANESHIFT_ONNX_THREADS", "0")),
                         help="onnxruntime intra-op threads (0 = all cores)")
+    parser.add_argument("--decisions-url", default=os.getenv("DECISIONS_URL", "https://openrouter.ai/api/alpha/decisions"))
+    parser.add_argument("--decisions-model", default=os.getenv("DECISIONS_MODEL", "respan/span-01-lite:free"))
+    parser.add_argument("--decisions-key-env", default="DECISIONS_FREE_OPENROUTER_API_KEY")
+    parser.add_argument("--decisions-timeout", type=float, default=15.0)
     return parser.parse_args(argv)
 
 

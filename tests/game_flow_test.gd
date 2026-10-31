@@ -10,6 +10,7 @@ func _initialize() -> void:
 func _run() -> void:
 	var game = MainScene.instantiate()
 	root.add_child(game)
+	game.countdown_seconds = 0.0
 	game.start_recording()
 	var start_button = game.menu_panel.find_child("Start", true, false)
 	start_button.pressed.emit()

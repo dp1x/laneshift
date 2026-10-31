@@ -45,14 +45,23 @@ def compact_kev_state(state: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("decision state has no valid authoritative legal_actions set")
 
     vehicles = []
+    player_lane = player.get("lane")
     for vehicle in traffic:
         if not isinstance(vehicle, dict):
             continue
+        distance = _round(vehicle.get("relative_distance_z"))
+        closing = _round(vehicle.get("relative_speed_z"))
+        same_lane = vehicle.get("lane") == player_lane
+        ttc = None
+        if same_lane and isinstance(distance, float) and isinstance(closing, float) and distance > 0.0 and closing > 0.0:
+            ttc = round(distance / closing, 2)
         vehicles.append({
             "id": vehicle.get("id"),
             "lane": vehicle.get("lane"),
-            "relative_distance": _round(vehicle.get("relative_distance_z")),
-            "relative_speed": _round(vehicle.get("relative_speed_z")),
+            "relative_distance": distance,
+            "relative_speed": closing,
+            "in_player_lane": same_lane,
+            "time_to_collision": ttc,
         })
 
     return {

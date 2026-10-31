@@ -98,6 +98,8 @@ class KevSystemOnePolicy:
                     "type": "choice",
                     "instructions": (
                         "Choose the safest useful next action from the currently legal choices. "
+                        "A decision may take about 1.2 seconds to apply. Brake early if a vehicle "
+                        "in the player's lane is closing and time_to_collision is small. "
                         "Only select an option present in criteria."
                     ),
                     "criteria": {action: ACTION_CRITERIA[action] for action in legal_actions},

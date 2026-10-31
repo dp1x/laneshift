@@ -48,9 +48,10 @@ def _user_tokens(tok: Tokenizer, text: str) -> list[int]:
 
 
 class OnnxKevPolicy:
-    def __init__(self, model_path: str, tokenizer_path: str, length: int = 256, intra_threads: int | None = None):
+    def __init__(self, model_path: str, tokenizer_path: str, length: int = 256, intra_threads: int | None = None, data_path: str | None = None):
         self.model_path = str(Path(model_path))
         self.tokenizer_path = str(Path(tokenizer_path))
+        self.data_path = str(Path(data_path)) if data_path else ""
         self.length = int(length)
         self.intra_threads = int(intra_threads or os.cpu_count() or 4)
         self.tok: Tokenizer | None = None
@@ -67,7 +68,7 @@ class OnnxKevPolicy:
         options = ort.SessionOptions()
         options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
         options.intra_op_num_threads = self.intra_threads
-        blob_path = Path(self.model_path).with_name("kev07b_fp16.data")
+        blob_path = Path(self.data_path) if self.data_path else Path(self.model_path).with_name("kev07b_fp16.data")
         if blob_path.exists():
             blob = np.memmap(blob_path, dtype=np.uint8, mode="r")
             options.add_external_initializers_from_files_in_memory([blob_path.name], [blob], [blob.nbytes])

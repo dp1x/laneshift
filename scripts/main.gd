@@ -45,6 +45,8 @@ var gameover_result_label: Label
 var record_button: Button
 var record_status_label: Label
 var notice_label: Label
+var countdown_label: Label
+var progress_bar: ProgressBar
 var notice_timer: float = 0.0
 
 var best_score: float = 0.0
@@ -68,6 +70,9 @@ var auto_total_episodes: int = 0
 var auto_max_episodes: int = 0
 var auto_running: bool = false
 var auto_episode_duration: float = 0.0
+var sim_speed_scale: float = 1.0
+var countdown_seconds: float = 3.0
+var countdown_timer: float = 0.0
 var action_event_sequence: int = 0
 var external_timeout_msec: int = 1500
 var max_stale_ticks: int = 30
@@ -138,6 +143,8 @@ func _parse_args() -> void:
 	auto_episodes_per_seed = int(options["episodes"])
 	auto_max_episodes = int(options["max_episodes"])
 	auto_episode_duration = float(options["episode_duration"])
+	sim_speed_scale = float(options["sim_speed_scale"])
+	countdown_seconds = float(options["countdown"])
 	websocket_port = int(options["ws_port"])
 	external_timeout_msec = int(options["external_timeout_ms"])
 	max_stale_ticks = int(options["max_stale_ticks"])
@@ -156,6 +163,8 @@ static func parse_options(args: PackedStringArray) -> Dictionary:
 		"episodes": 1,
 		"max_episodes": 0,
 		"episode_duration": 0.0,
+		"sim_speed_scale": 1.0,
+		"countdown": 3.0,
 		"ws_port": 8765,
 		"external_timeout_ms": 1500,
 		"max_stale_ticks": 30,
@@ -189,6 +198,10 @@ static func parse_options(args: PackedStringArray) -> Dictionary:
 				options["max_episodes"] = int(value)
 			"--episode-duration":
 				options["episode_duration"] = float(value)
+			"--sim-speed-scale":
+				options["sim_speed_scale"] = clampf(float(value), 0.1, 4.0)
+			"--countdown":
+				options["countdown"] = clampf(float(value), 0.0, 10.0)
 			"--ws-port":
 				options["ws_port"] = clampi(int(value), 1, 65535)
 			"--external-timeout-ms":
@@ -243,7 +256,7 @@ func _draw() -> void:
 			draw_rect(Rect2(lane_x - 2, y, 4, DASH_LENGTH), Color(0.85, 0.88, 0.9, 0.8))
 			y += period
 
-	# roadside posts
+	# roadside posts and a low parallax skyline
 	var post_start: float = floor(sim.player_z / 24.0) * 24.0
 	for i in range(-2, 14):
 		var z: float = post_start + i * 24.0
@@ -254,6 +267,18 @@ func _draw() -> void:
 			var px: float = center_x + side * (road_half + 30.0)
 			draw_rect(Rect2(px - 4, py - 20, 8, 20), Color(0.5, 0.53, 0.57))
 			draw_rect(Rect2(px - 6, py - 22, 12, 4), Color(0.78, 0.8, 0.82))
+	var city_start: float = floor(sim.player_z / 40.0) * 40.0
+	for i in range(-1, 12):
+		var cz: float = city_start + i * 40.0
+		var cy: float = player_y - (cz - sim.player_z) * PX_PER_M_Z
+		if cy < -120 or cy > view.y + 120:
+			continue
+		for side in [-1, 1]:
+			var bx: float = center_x + side * (road_half + 92.0)
+			var bh: float = 50.0 + fmod(float(i * 37 + side * 13), 90.0)
+			draw_rect(Rect2(bx, cy - bh, 58, bh), Color(0.035, 0.06, 0.09, 0.85))
+			for wx in range(3):
+				draw_rect(Rect2(bx + 8 + wx * 16, cy - bh + 12, 6, 8), Color(0.55, 0.8, 0.95, 0.18))
 
 	# traffic
 	for v in sim.traffic:
@@ -271,6 +296,9 @@ func _draw() -> void:
 			var sy := fmod(sim.player_z * PX_PER_M_Z * 1.8 + i * 97.0, view.y)
 			draw_rect(Rect2(sx, sy, 3, 40 + speed_ratio * 50), Color(0.7, 0.9, 1.0, streak_alpha))
 			draw_rect(Rect2(center_x + road_half + 22 + (i % 3) * 14, sy, 3, 40 + speed_ratio * 50), Color(0.7, 0.9, 1.0, streak_alpha))
+
+	if sim.status == "finished" and shake_timer > 0.0:
+		draw_rect(Rect2(Vector2.ZERO, view), Color(1.0, 0.08, 0.04, minf(0.35, shake_timer * 0.5)))
 
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
@@ -290,6 +318,15 @@ func _draw_vehicle(v: Dictionary, center_x: float, player_y: float) -> void:
 	draw_rect(Rect2(body.position + Vector2(4, 6), body.size), Color(0, 0, 0, 0.28))
 	draw_rect(body, color)
 	draw_rect(Rect2(body.position.x + 3, body.position.y + 3, body.size.x - 6, body.size.y - 6), color.darkened(0.18))
+	# wheels
+	var wheel_w := maxf(4.0, body.size.x * 0.16)
+	var wheel_h := maxf(10.0, body.size.y * 0.16)
+	for wx in [body.position.x - 2.0, body.end.x - wheel_w + 2.0]:
+		for wy in [body.position.y + body.size.y * 0.16, body.position.y + body.size.y * 0.68]:
+			draw_rect(Rect2(wx, wy, wheel_w, wheel_h), Color(0.04, 0.04, 0.05))
+	# mirrors
+	draw_rect(Rect2(body.position.x - 3, body.position.y + body.size.y * 0.22, 3, 8), Color(0.1, 0.1, 0.12))
+	draw_rect(Rect2(body.end.x, body.position.y + body.size.y * 0.22, 3, 8), Color(0.1, 0.1, 0.12))
 	# windshield / roof
 	var roof_h := body.size.y * 0.28
 	draw_rect(Rect2(body.position.x + 5, body.position.y + body.size.y * 0.18, body.size.x - 10, roof_h), Color(0.12, 0.18, 0.24))
@@ -317,10 +354,21 @@ func _draw_bike(bx: float, by: float) -> void:
 	draw_rect(Rect2(-7, -6, 14, 5), Color(1.0, 0.45, 0.3, 0.6))
 	# handlebars
 	draw_rect(Rect2(-22, -26, 44, 5), Color(0.65, 0.68, 0.72))
+	# arms from the rider to the bars
+	draw_line(Vector2(-10, -6), Vector2(-18, -24), Color(0.16, 0.18, 0.22), 5.0)
+	draw_line(Vector2(10, -6), Vector2(18, -24), Color(0.16, 0.18, 0.22), 5.0)
+	# rider torso and legs
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-10, -8), Vector2(10, -8), Vector2(8, 16), Vector2(-8, 16)
+	]), Color(0.14, 0.16, 0.2))
+	draw_line(Vector2(-6, 12), Vector2(-9, 24), Color(0.1, 0.12, 0.16), 5.0)
+	draw_line(Vector2(6, 12), Vector2(9, 24), Color(0.1, 0.12, 0.16), 5.0)
 	# rider
 	draw_circle(Vector2(0, 2), 13, Color(0.14, 0.16, 0.2))
 	draw_circle(Vector2(0, -13), 10, Color(0.9, 0.9, 0.88))
 	draw_rect(Rect2(-7, -16, 14, 4), Color(0.15, 0.55, 0.75))
+	# exhaust
+	draw_circle(Vector2(0, 46), 4, Color(0.55, 0.6, 0.65, 0.35))
 	# headlight
 	draw_rect(Rect2(-5, -46, 10, 4), Color(1.0, 0.95, 0.65))
 	if sim.braking:
@@ -433,6 +481,25 @@ func _build_ui() -> void:
 	notice_label.add_theme_font_size_override("font_size", 22)
 	notice_label.visible = false
 	hud.add_child(notice_label)
+
+	countdown_label = Label.new()
+	countdown_label.set_anchors_preset(Control.PRESET_FULL_RECT)
+	countdown_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	countdown_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	countdown_label.add_theme_font_size_override("font_size", 96)
+	countdown_label.add_theme_color_override("font_color", Color(0.3, 0.95, 0.95))
+	countdown_label.visible = false
+	hud.add_child(countdown_label)
+
+	progress_bar = ProgressBar.new()
+	progress_bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	progress_bar.offset_left = -300
+	progress_bar.offset_right = 300
+	progress_bar.offset_top = -74
+	progress_bar.offset_bottom = -58
+	progress_bar.max_value = 500.0
+	progress_bar.show_percentage = false
+	hud.add_child(progress_bar)
 
 	menu_panel = _make_panel("LANESHIFT 2D", ["Start", "Open Logs", "Quit"])
 	menu_panel.theme = ui_theme
@@ -574,7 +641,14 @@ func start_game(seed: int = -1, cfg: Dictionary = {}, requested_episode_id: Stri
 	menu_panel.visible = false
 	pause_panel.visible = false
 	gameover_panel.visible = false
-	state = "playing"
+	if countdown_seconds > 0.0:
+		state = "countdown"
+		countdown_timer = countdown_seconds
+		countdown_label.visible = true
+		countdown_label.text = str(int(ceil(countdown_timer)))
+	else:
+		state = "playing"
+		countdown_label.visible = false
 	telemetry_timer = 0.0
 	decision_timer = 0.0
 	queue_redraw()
@@ -781,6 +855,17 @@ func _physics_process(delta: float) -> void:
 		shake_timer -= delta
 		if shake_timer <= 0:
 			shake_offset = Vector2.ZERO
+	if state == "countdown":
+		countdown_timer = maxf(0.0, countdown_timer - delta)
+		if countdown_timer > 0.0:
+			countdown_label.text = str(int(ceil(countdown_timer)))
+		else:
+			state = "playing"
+			countdown_label.visible = false
+			_log_event("countdown_finished", {})
+		_update_hud()
+		queue_redraw()
+		return
 	if state == "playing":
 		_handle_human_input(delta)
 		if external_control and not auto_run and Time.get_ticks_msec() - last_external_action_msec > external_timeout_msec:
@@ -788,7 +873,7 @@ func _physics_process(delta: float) -> void:
 			control_mode = "human"
 			_log_event("controller_timeout", {"fallback_control": "human"})
 			_submit_action("STAY", 0.1, "human", "human")
-		sim.step(delta)
+		sim.step(delta * sim_speed_scale)
 		_log_score_milestones(sim.score)
 		if sim.status != "running":
 			_update_hud()
@@ -1010,6 +1095,8 @@ func _update_hud() -> void:
 	speed_label.text = "Speed: %.0f" % (sim.player_speed * 3.6)
 	best_label.text = "Best: %.0f" % best_score
 	status_label.text = "CONTROL  " + control_mode.to_upper()
+	if progress_bar != null:
+		progress_bar.value = fmod(sim.distance, 500.0)
 
 func _load_highscore() -> void:
 	var f := FileAccess.open(highscore_path, FileAccess.READ)
