@@ -71,8 +71,10 @@ var auto_max_episodes: int = 0
 var auto_running: bool = false
 var auto_episode_duration: float = 0.0
 var sim_speed_scale: float = 1.0
-var countdown_seconds: float = 3.0
+var countdown_seconds: float = 0.0
 var countdown_timer: float = 0.0
+var no_controller: bool = false
+var start_fullscreen: bool = false
 var action_event_sequence: int = 0
 var external_timeout_msec: int = 1500
 var max_stale_ticks: int = 30
@@ -117,6 +119,7 @@ func _ready() -> void:
 	telemetry = TelemetryLogger.new()
 	add_child(telemetry)
 	net = NetBridge.new()
+	net.enabled = not no_controller
 	net.url = "ws://127.0.0.1:%d" % websocket_port
 	net.max_stale_ticks = max_stale_ticks
 	add_child(net)
@@ -129,6 +132,8 @@ func _ready() -> void:
 		_start_auto_run()
 	elif record_on_start:
 		start_recording()
+	if start_fullscreen:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 	queue_redraw()
 
 func _parse_args() -> void:
@@ -145,6 +150,8 @@ func _parse_args() -> void:
 	auto_episode_duration = float(options["episode_duration"])
 	sim_speed_scale = float(options["sim_speed_scale"])
 	countdown_seconds = float(options["countdown"])
+	no_controller = bool(options["no_controller"])
+	start_fullscreen = bool(options["fullscreen"])
 	websocket_port = int(options["ws_port"])
 	external_timeout_msec = int(options["external_timeout_ms"])
 	max_stale_ticks = int(options["max_stale_ticks"])
@@ -164,8 +171,10 @@ static func parse_options(args: PackedStringArray) -> Dictionary:
 		"max_episodes": 0,
 		"episode_duration": 0.0,
 		"sim_speed_scale": 1.0,
-		"countdown": 3.0,
-		"ws_port": 8765,
+		"countdown": 0.0,
+		"no_controller": false,
+		"fullscreen": false,
+		"ws_port": 8766,
 		"external_timeout_ms": 1500,
 		"max_stale_ticks": 30,
 		"traffic_density": -1.0,
@@ -180,6 +189,12 @@ static func parse_options(args: PackedStringArray) -> Dictionary:
 			continue
 		if arg == "--take-control-on-start":
 			options["take_control_on_start"] = true
+			continue
+		if arg == "--no-controller":
+			options["no_controller"] = true
+			continue
+		if arg == "--fullscreen":
+			options["fullscreen"] = true
 			continue
 		var split := arg.split("=", true, 1)
 		if split.size() != 2:
@@ -659,11 +674,20 @@ func restart_game() -> void:
 func go_menu() -> void:
 	if sim.status == "running":
 		sim.finish_episode("menu_exit")
+	# A menu is a clean title state, not the crash scene from the last run.
+	sim.reset(rng_visual.randi(), DEFAULT_CONFIG.duplicate(true), "")
+	sim.traffic.clear()
+	sim.status = "idle"
+	sim.player_speed = 0.0
+	sim.player_x = 0.0
+	sim.player_z = 0.0
 	get_tree().paused = false
 	state = "menu"
 	menu_panel.visible = true
 	pause_panel.visible = false
 	gameover_panel.visible = false
+	countdown_label.visible = false
+	_update_hud()
 	queue_redraw()
 
 func _on_crashed(_eid: String) -> void:
@@ -928,6 +952,12 @@ func _input(event: InputEvent) -> void:
 func _process(_delta: float) -> void:
 	if _key_just_pressed(KEY_F9):
 		_toggle_recording()
+	if _key_just_pressed(KEY_F11):
+		var current := DisplayServer.window_get_mode()
+		if current == DisplayServer.WINDOW_MODE_FULLSCREEN:
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+		else:
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 	if Input.is_action_just_pressed("ui_cancel"):
 		if state == "playing":
 			pause_game()
@@ -1096,6 +1126,7 @@ func _update_hud() -> void:
 	best_label.text = "Best: %.0f" % best_score
 	status_label.text = "CONTROL  " + control_mode.to_upper()
 	if progress_bar != null:
+		progress_bar.visible = state == "playing"
 		progress_bar.value = fmod(sim.distance, 500.0)
 
 func _load_highscore() -> void:

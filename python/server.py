@@ -108,6 +108,7 @@ def load_policy(name, model_configs=None, http_client=None, onnx_config=None, de
             length=int(config.get("length", 256)),
             intra_threads=int(config.get("threads", 0)) or None,
             data_path=str(config.get("data_path", "") or "") or None,
+            arena=bool(config.get("arena", False)),
         )
     config = (model_configs or {}).get(name)
     if config is None:
@@ -437,6 +438,7 @@ async def run_server(args):
             "data_path": args.onnx_data,
             "length": args.onnx_length,
             "threads": args.onnx_threads,
+            "arena": args.onnx_arena,
         }
         decisions_config = {
             "url": args.decisions_url,
@@ -510,6 +512,8 @@ def parse_args(argv=None):
                         help="fixed sequence length baked into the exported graph")
     parser.add_argument("--onnx-threads", type=int, default=int(os.getenv("LANESHIFT_ONNX_THREADS", "0")),
                         help="onnxruntime intra-op threads (0 = all cores)")
+    parser.add_argument("--onnx-arena", action="store_true",
+                        help="enable the ONNX Runtime CPU memory arena (faster, more RAM)")
     parser.add_argument("--decisions-url", default=os.getenv("DECISIONS_URL", "https://openrouter.ai/api/alpha/decisions"))
     parser.add_argument("--decisions-model", default=os.getenv("DECISIONS_MODEL", "respan/span-01-lite:free"))
     parser.add_argument("--decisions-key-env", default="DECISIONS_FREE_OPENROUTER_API_KEY")

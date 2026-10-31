@@ -1,0 +1,14 @@
+{
+	"build_commit": "dev",
+	"counts": {
+		"episodes": 0,
+		"events": 2,
+		"telemetry": 0
+	},
+	"engine_version": "",
+	"recording_schema_version": "1",
+	"session_id": "",
+	"status": "complete",
+	"utc_end_time": "2026-10-31T15:02:31",
+	"utc_start_time": ""
+}

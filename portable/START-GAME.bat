@@ -12,3 +12,4 @@ if errorlevel 1 (
   "%~dp0LANESHIFT.exe" --rendering-method gl_compatibility --log-file "%~dp0logs\LANESHIFT-Compatibility.log" %*
 )
 exit /b %errorlevel%
+

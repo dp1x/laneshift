@@ -48,12 +48,13 @@ def _user_tokens(tok: Tokenizer, text: str) -> list[int]:
 
 
 class OnnxKevPolicy:
-    def __init__(self, model_path: str, tokenizer_path: str, length: int = 256, intra_threads: int | None = None, data_path: str | None = None):
+    def __init__(self, model_path: str, tokenizer_path: str, length: int = 256, intra_threads: int | None = None, data_path: str | None = None, arena: bool = False):
         self.model_path = str(Path(model_path))
         self.tokenizer_path = str(Path(tokenizer_path))
         self.data_path = str(Path(data_path)) if data_path else ""
         self.length = int(length)
         self.intra_threads = int(intra_threads or os.cpu_count() or 4)
+        self.arena = bool(arena)
         self.tok: Tokenizer | None = None
         self.session: ort.InferenceSession | None = None
         self.label_source = "original_model"
@@ -65,18 +66,40 @@ class OnnxKevPolicy:
 
     async def start(self) -> None:
         self.tok = Tokenizer.from_file(self.tokenizer_path)
-        options = ort.SessionOptions()
-        options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
-        options.intra_op_num_threads = self.intra_threads
         blob_path = Path(self.data_path) if self.data_path else Path(self.model_path).with_name("kev07b_fp16.data")
-        if blob_path.exists():
-            blob = np.memmap(blob_path, dtype=np.uint8, mode="r")
-            options.add_external_initializers_from_files_in_memory([blob_path.name], [blob], [blob.nbytes])
-            proto = Path(self.model_path).read_bytes()
-            self.session = ort.InferenceSession(proto, options, providers=["CPUExecutionProvider"])
-            self._blob = blob
-        else:
-            self.session = ort.InferenceSession(self.model_path, options, providers=["CPUExecutionProvider"])
+        last_error: Exception | None = None
+        # Fast path first (more threads + arena), then progressively more
+        # memory-conservative attempts. The last attempt always fits a small
+        # host: one thread, no arena.
+        attempts = [(self.intra_threads, self.arena), (min(4, self.intra_threads), True), (1, False)]
+        seen: set[tuple[int, bool]] = set()
+        for threads, arena in attempts:
+            key = (max(1, int(threads)), bool(arena))
+            if key in seen:
+                continue
+            seen.add(key)
+            options = ort.SessionOptions()
+            options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
+            options.intra_op_num_threads = key[0]
+            options.enable_cpu_mem_arena = key[1]
+            try:
+                self.session = ort.InferenceSession(self.model_path, options, providers=["CPUExecutionProvider"])
+                self._blob = None
+                return
+            except Exception as first_error:
+                last_error = first_error
+                if not blob_path.exists():
+                    continue
+                blob = np.memmap(blob_path, dtype=np.uint8, mode="r")
+                options.add_external_initializers_from_files_in_memory([blob_path.name], [blob], [blob.nbytes])
+                proto = Path(self.model_path).read_bytes()
+                try:
+                    self.session = ort.InferenceSession(proto, options, providers=["CPUExecutionProvider"])
+                    self._blob = blob
+                    return
+                except Exception as second_error:
+                    last_error = second_error
+        raise RuntimeError(f"could not load ONNX model {self.model_path}: {last_error}") from last_error
 
     def _encode(self, state: dict[str, Any]) -> dict[str, np.ndarray]:
         if self.tok is None:

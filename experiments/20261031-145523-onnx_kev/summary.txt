@@ -1,0 +1,9 @@
+policy: onnx_kev
+seeds: [1, 2, 3]
+episodes: 3
+score: {'mean': 104.89, 'std': 31.18, 'min': 60.79, 'max': 126.94}
+distance: {'mean': 220.13, 'std': 69.63, 'min': 121.67, 'max': 269.37}
+survival: {'mean': 8.24, 'std': 2.49, 'min': 4.73, 'max': 10.0}
+collisions: {'mean': 0.33, 'std': 0.47, 'min': 0.0, 'max': 1.0}
+overtaken: {'mean': 1.67, 'std': 0.47, 'min': 1.0, 'max': 2.0}
+crashes: 1

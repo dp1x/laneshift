@@ -15,8 +15,8 @@ window/stretch/aspect="expand"
 ; The app is DPI-unaware, so Windows shrinks the requested window by the
 ; display scale (150% here) while leaving the framebuffer at viewport size.
 ; Requesting 1.5x the canvas makes the physical window match it exactly.
-window/size/window_width_override=1200
-window/size/window_height_override=675
+window/size/window_width_override=1280
+window/size/window_height_override=720
 
 [physics]
 common/physics_ticks_per_second=60
@@ -27,3 +27,5 @@ renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 textures/vram_compression/import_etc2_astc=true
 anti_aliasing/quality/msaa_3d=0
+
+

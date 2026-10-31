@@ -7,7 +7,8 @@ signal action_received(action: String, duration: float, seq: int, tick: int, epi
 signal reset_received(seed: int, config: Dictionary, episode_id: String)
 signal command_rejected(seq: int, reason: String, episode_id: String, tick: int, decision_metadata: Dictionary)
 
-var url: String = "ws://127.0.0.1:8765"
+var url: String = "ws://127.0.0.1:8766"
+var enabled: bool = true
 var socket: WebSocketPeer = WebSocketPeer.new()
 var connected_flag: bool = false
 var last_seq: int = -1
@@ -39,7 +40,8 @@ func update_state(snapshot: Dictionary) -> void:
 	current_state_tick = int(snapshot.get("physics_tick", -1))
 
 func _ready() -> void:
-	_connect_socket()
+	if enabled:
+		_connect_socket()
 
 func _connect_socket() -> void:
 	var err := socket.connect_to_url(url)
@@ -47,6 +49,8 @@ func _connect_socket() -> void:
 		connected_flag = false
 
 func _process(delta: float) -> void:
+	if not enabled:
+		return
 	socket.poll()
 	var state := socket.get_ready_state()
 	if state == WebSocketPeer.STATE_OPEN:
@@ -78,7 +82,7 @@ func _process(delta: float) -> void:
 		reconnect_timer = 0.0
 
 func send_state(snapshot: Dictionary) -> void:
-	if not connected_flag:
+	if not enabled or not connected_flag:
 		return
 	var msg := {"type": "state", "protocol_version": 1}
 	for k in snapshot.keys():
@@ -86,7 +90,7 @@ func send_state(snapshot: Dictionary) -> void:
 	outbound_queue.append(msg)
 
 func send_event(event: Dictionary) -> void:
-	if not connected_flag:
+	if not enabled or not connected_flag:
 		return
 	outbound_queue.append({"type": "event", "protocol_version": 1, "event": event})
 

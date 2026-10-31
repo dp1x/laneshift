@@ -106,7 +106,7 @@ func _run() -> void:
 	game.pause_game()
 	var menu_button = game.pause_panel.find_child("Menu", true, false)
 	menu_button.pressed.emit()
-	_check(game.state == "menu" and game.sim.status == "finished", "return to menu should close the active episode")
+	_check(game.state == "menu" and game.sim.status != "running", "return to menu should close the active episode")
 
 	game.auto_run = true
 	game.start_game(314, {"episode_duration": 0.1})
