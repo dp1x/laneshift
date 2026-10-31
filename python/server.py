@@ -169,6 +169,7 @@ class ControllerServer:
             await start()
 
     async def handle_connection(self, websocket):
+        print(f"controller: client connected ({websocket.remote_address})", flush=True)
         state_queue: asyncio.Queue = asyncio.Queue(maxsize=1)
         latest_state: dict[str, Any] = {"state": None}
         decision_task = asyncio.create_task(self._decision_loop(websocket, state_queue, latest_state))
@@ -214,6 +215,7 @@ class ControllerServer:
         except websockets.ConnectionClosed:
             pass
         finally:
+            print("controller: client disconnected", flush=True)
             decision_task.cancel()
             try:
                 await decision_task
@@ -270,6 +272,7 @@ class ControllerServer:
             self.controller_failures += 1
             fallback_reason = f"inference_error:{type(exc).__name__}:{exc}"
             error_details = getattr(exc, "details", {})
+            print(f"controller: decision error: {fallback_reason}", flush=True)
         elapsed_ms = (time.perf_counter() - started) * 1000.0
         self.latencies_ms.append(elapsed_ms)
 

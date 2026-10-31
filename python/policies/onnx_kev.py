@@ -75,43 +75,50 @@ class OnnxKevPolicy:
         self.model_sha256 = ""
         self.state_token_limit = max(8, self.length - 96)
         self.last_encoding: dict[str, Any] = {}
+        self._blob = None
 
     async def start(self) -> None:
         self.tok = Tokenizer.from_file(self.tokenizer_path)
         self.model_sha256 = hashlib.sha256(Path(self.model_path).read_bytes()).hexdigest()
         blob_path = Path(self.data_path) if self.data_path else Path(self.model_path).with_name("kev07b_fp16.data")
         last_error: Exception | None = None
-        # Fast path first (more threads + arena), then progressively more
-        # memory-conservative attempts. The last attempt always fits a small
-        # host: one thread, no arena.
-        attempts = [(self.intra_threads, self.arena), (min(4, self.intra_threads), True), (1, False)]
-        seen: set[tuple[int, bool]] = set()
-        for threads, arena in attempts:
-            key = (max(1, int(threads)), bool(arena))
-            if key in seen:
-                continue
-            seen.add(key)
+        drive = Path(self.model_path).drive.upper() if Path(self.model_path).drive else ""
+        # Some RAM-disk filesystems cannot answer the canonical-path query ONNX
+        # Runtime uses for external data. Go straight to the in-memory loader on
+        # those drives; a failed normal attempt leaves enough fragmentation to
+        # make the fallback fail with bad allocation.
+        if drive != "R:":
             options = ort.SessionOptions()
             options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
-            options.intra_op_num_threads = key[0]
-            options.enable_cpu_mem_arena = key[1]
+            options.intra_op_num_threads = max(1, int(self.intra_threads))
+            options.enable_cpu_mem_arena = bool(self.arena)
             try:
                 self.session = ort.InferenceSession(self.model_path, options, providers=["CPUExecutionProvider"])
                 self._blob = None
                 return
             except Exception as first_error:
                 last_error = first_error
-                if not blob_path.exists():
-                    continue
+
+        # In-memory external data path for RAM disks and other filesystems that
+        # reject canonical path validation. Conservative options avoid the
+        # constant-folding peak that causes a second bad allocation.
+        if blob_path.exists():
+            try:
+                options = ort.SessionOptions()
+                options.intra_op_num_threads = min(4, max(1, int(self.intra_threads)))
+                options.enable_cpu_mem_arena = False
+                options.enable_mem_pattern = False
+                options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+                options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
                 blob = np.memmap(blob_path, dtype=np.uint8, mode="r")
                 options.add_external_initializers_from_files_in_memory([blob_path.name], [blob], [blob.nbytes])
                 proto = Path(self.model_path).read_bytes()
-                try:
-                    self.session = ort.InferenceSession(proto, options, providers=["CPUExecutionProvider"])
-                    self._blob = blob
-                    return
-                except Exception as second_error:
-                    last_error = second_error
+                self.session = ort.InferenceSession(proto, options, providers=["CPUExecutionProvider"])
+                self._blob = blob
+                print("onnx_kev: loaded external weights through the in-memory fallback", flush=True)
+                return
+            except Exception as fallback_error:
+                last_error = fallback_error
         raise RuntimeError(f"could not load ONNX model {self.model_path}: {last_error}") from last_error
 
     def _encode(self, state: dict[str, Any]) -> dict[str, np.ndarray]:

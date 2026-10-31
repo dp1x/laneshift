@@ -3,7 +3,7 @@ param(
     [string]$Tokenizer = $env:LANESHIFT_ONNX_TOKENIZER,
     [int]$Port = 8766,
     [int]$Length = 256,
-    [int]$Threads = 0,
+    [int]$Threads = 4,
     [string]$Godot = "godot",
     [string]$ModelId = "",
     [ValidateSet("original_model", "fine_tuned_model")]
@@ -95,6 +95,12 @@ try {
     if (-not $ready) {
         throw "Controller did not open 127.0.0.1:$Port. See $controllerErr"
     }
+    # The TCP port opens a moment before clients are served reliably. Give the
+    # event loop and the first inference warm-up a beat before launching.
+    Start-Sleep -Milliseconds 1000
+    if ($controller.HasExited) {
+        throw "Controller exited immediately after opening the port. See $controllerErr"
+    }
 
     Write-Host "Controller ready. Launching LANESHIFT with Kev in control."
     Write-Host "Model: $ModelId"
@@ -118,7 +124,13 @@ try {
         if ($Headless) { $exeArgs += "--headless" }
         $exeArgs += "--"
         $exeArgs += $gameArgs
-        & $gameExe @exeArgs
+        Write-Host ("Game: " + $gameExe + " " + ($exeArgs -join " "))
+        # Use Start-Process for the exported executable. PowerShell's call
+        # operator can re-bind native arguments containing '=' and '--'; the
+        # game then silently starts with the default port and never connects.
+        $gameProcess = Start-Process -FilePath $gameExe -ArgumentList $exeArgs -PassThru -NoNewWindow
+        Wait-Process -Id $gameProcess.Id
+        exit $gameProcess.ExitCode
     } else {
         $godotArgs = @()
         if ($Headless) { $godotArgs += "--headless" }

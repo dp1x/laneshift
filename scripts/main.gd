@@ -30,6 +30,14 @@ const PLAYER_SCREEN_Y := 0.80
 const BIKE_WIDTH_M := 0.9
 const BIKE_LENGTH_M := 2.2
 
+const UI_INK := Color(0.91, 0.95, 0.98)
+const UI_MUTED := Color(0.55, 0.63, 0.70)
+const UI_FAINT := Color(0.36, 0.44, 0.50)
+const UI_ACCENT := Color(0.29, 0.84, 0.91)
+const UI_WARN := Color(0.95, 0.63, 0.30)
+const UI_DANGER := Color(0.95, 0.35, 0.30)
+const UI_BG := Color(0.015, 0.03, 0.045)
+
 var sim: Simulation
 var telemetry: TelemetryLogger
 var net: NetBridge
@@ -53,13 +61,28 @@ var record_button: Button
 var record_status_label: Label
 var notice_label: Label
 var countdown_label: Label
-var menu_backdrop: ColorRect
-var ai_panel: PanelContainer
+var menu_backdrop: Control
+var modal_scrim: ColorRect
+var ai_panel: Control
 var ai_model_label: Label
 var ai_action_label: Label
+var ai_prob_label: Label
 var ai_latency_label: Label
+var ai_state_label: Label
+var ai_history: Control
 var notice_timer: float = 0.0
 var menu_scroll: float = 0.0
+var menu_status_label: Label
+var score_caption: Label
+var speed_caption: Label
+var speed_unit_label: Label
+var onboarding_timer: float = 0.0
+var lane_flash: float = 0.0
+var score_flash: float = 0.0
+var ai_history_actions: Array = []
+var mono_font: SystemFont
+var sans_font: SystemFont
+var fog_texture: GradientTexture2D
 
 var best_score: float = 0.0
 var highscore_path: String = ""
@@ -316,6 +339,7 @@ func _draw() -> void:
 	_draw_roadside(scroll_z, center_x, view, horizon)
 	for boundary in [-LANE_HALF_PX, LANE_HALF_PX]:
 		_draw_lane_dashes(boundary, scroll_z, center_x)
+	_draw_horizon_fog(view, far_y)
 
 	# draw far traffic first so near traffic and the player stay on top
 	var traffic_list: Array = sim.traffic if state != "menu" else _menu_traffic(scroll_z)
@@ -325,6 +349,9 @@ func _draw() -> void:
 		_draw_vehicle(v, center_x, scroll_z)
 
 	if state != "menu":
+		if lane_flash > 0.0:
+			var lane_x: float = _screen_x_for_world(sim.lane_center(sim.player_lane), 1.0)
+			draw_line(Vector2(lane_x - 18.0, player_y + 38.0), Vector2(lane_x + 18.0, player_y + 38.0), Color(UI_ACCENT.r, UI_ACCENT.g, UI_ACCENT.b, 0.35 * lane_flash), 2.0)
 		_draw_bike(player_y)
 
 	# speed streaks outside the road edges
@@ -340,6 +367,20 @@ func _draw() -> void:
 		draw_rect(Rect2(Vector2.ZERO, view), Color(1.0, 0.04, 0.02, clampf(crash_flash, 0.0, 0.55)))
 
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+func _draw_horizon_fog(view: Vector2, far_y: float) -> void:
+	if fog_texture == null:
+		var gradient := Gradient.new()
+		gradient.set_color(0, Color(UI_BG.r, UI_BG.g, UI_BG.b, 0.0))
+		gradient.set_color(1, Color(UI_BG.r, UI_BG.g, UI_BG.b, 0.0))
+		gradient.add_point(0.34, Color(UI_BG.r, UI_BG.g, UI_BG.b, 0.92))
+		fog_texture = GradientTexture2D.new()
+		fog_texture.gradient = gradient
+		fog_texture.width = 1
+		fog_texture.height = 128
+		fog_texture.fill_from = Vector2.ZERO
+		fog_texture.fill_to = Vector2.DOWN
+	draw_texture_rect(fog_texture, Rect2(0, far_y - 54.0, view.x, 150.0), false)
 
 func _draw_lane_dashes(boundary_px: float, scroll_z: float, center_x: float) -> void:
 	var period := DASH_LENGTH_M + DASH_GAP_M
@@ -419,15 +460,25 @@ func _draw_vehicle(v: Dictionary, center_x: float, scroll_z: float) -> void:
 	var color: Color = palette[abs(int(String(v.get("id", "0")).hash())) % palette.size()]
 	if is_truck:
 		color = Color(0.82, 0.52, 0.14)
+	var fog := clampf(z_rel / VIEW_Z, 0.0, 1.0)
+	color = color.lerp(Color(0.012, 0.028, 0.045), fog * 0.55)
 	var body := Rect2(vx - width_px * 0.5, dy - length_px * 0.5, width_px, length_px)
 	draw_rect(Rect2(body.position + Vector2(3, 5) * scale, body.size), Color(0, 0, 0, 0.34))
+	var top_half := width_px * 0.46
+	var body_points := PackedVector2Array([
+		Vector2(vx - top_half, body.position.y),
+		Vector2(vx + top_half, body.position.y),
+		Vector2(vx + width_px * 0.5, body.end.y),
+		Vector2(vx - width_px * 0.5, body.end.y),
+	])
+	draw_colored_polygon(body_points, color)
 	var wheel_w := maxf(2.0, width_px * 0.16)
 	var wheel_h := maxf(3.0, length_px * 0.18)
 	for wx in [body.position.x - wheel_w * 0.45, body.end.x - wheel_w * 0.55]:
 		for wy in [body.position.y + length_px * 0.14, body.position.y + length_px * 0.68]:
 			draw_rect(Rect2(wx, wy, wheel_w, wheel_h), Color(0.02, 0.02, 0.03))
-	draw_rect(body, color)
 	draw_rect(body.grow(-2.0 * scale), color.lightened(0.06))
+	draw_line(Vector2(vx - top_half, body.position.y), Vector2(vx + top_half, body.position.y), Color(1, 1, 1, 0.14), maxf(1.0, 1.5 * scale))
 	var glass := Color(0.035, 0.07, 0.1)
 	draw_rect(Rect2(body.position.x + width_px * 0.16, body.position.y + length_px * 0.18, width_px * 0.68, length_px * 0.24), glass)
 	draw_rect(Rect2(body.position.x + width_px * 0.16, body.position.y + length_px * 0.58, width_px * 0.68, length_px * 0.16), glass.lightened(0.08))
@@ -487,208 +538,239 @@ func _build_ui() -> void:
 	add_child(ui_layer)
 	var ui_theme := _make_theme()
 
+	menu_backdrop = TextureRect.new()
+	menu_backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	menu_backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	menu_backdrop.texture = _gradient_texture(Color(0.006, 0.012, 0.022, 0.94), Color(0.006, 0.012, 0.022, 0.04), true)
+	menu_backdrop.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	menu_backdrop.stretch_mode = TextureRect.STRETCH_SCALE
+	menu_backdrop.visible = false
+	ui_layer.add_child(menu_backdrop)
+
+	modal_scrim = ColorRect.new()
+	modal_scrim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	modal_scrim.color = Color(0.0, 0.0, 0.0, 0.58)
+	modal_scrim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	modal_scrim.visible = false
+	ui_layer.add_child(modal_scrim)
+
 	hud = Control.new()
 	hud.set_anchors_preset(Control.PRESET_FULL_RECT)
 	hud.theme = ui_theme
 	ui_layer.add_child(hud)
+	_add_scrim(hud, true, 190.0)
+	_add_scrim(hud, false, 160.0)
 
-	menu_backdrop = ColorRect.new()
-	menu_backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
-	menu_backdrop.color = Color(0.0, 0.0, 0.0, 0.62)
-	menu_backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	menu_backdrop.visible = false
-	ui_layer.add_child(menu_backdrop)
-
-	var score_panel := _make_hud_panel(Vector2(0, 0), Vector2(24, 20), Vector2(230, 104))
-	hud.add_child(score_panel)
-	var score_box := VBoxContainer.new()
-	score_box.add_theme_constant_override("separation", 1)
-	score_panel.add_child(score_box)
-	score_label = Label.new()
-	score_label.text = "0"
-	score_label.add_theme_font_size_override("font_size", 32)
-	score_label.add_theme_color_override("font_color", Color(0.94, 0.98, 1.0))
+	var score_box := _corner_box(hud, Vector2(0, 0), Vector2(36, 28), Vector2(300, 122), false, false)
+	score_caption = _make_label("SCORE", 9, UI_MUTED, false, true)
+	score_box.add_child(score_caption)
+	score_label = _make_label("0", 46, UI_INK, true, false)
 	score_box.add_child(score_label)
-	best_label = Label.new()
-	best_label.text = "BEST 0"
-	best_label.add_theme_font_size_override("font_size", 12)
-	best_label.add_theme_color_override("font_color", Color(0.55, 0.66, 0.72))
-	score_box.add_child(best_label)
-	dist_label = Label.new()
-	dist_label.text = "0 m"
-	dist_label.add_theme_font_size_override("font_size", 12)
-	dist_label.add_theme_color_override("font_color", Color(0.55, 0.66, 0.72))
-	score_box.add_child(dist_label)
+	var best_row := HBoxContainer.new()
+	best_row.add_theme_constant_override("separation", 8)
+	best_label = _make_label("BEST 0", 9, UI_MUTED, true, true)
+	dist_label = _make_label("0 M", 9, UI_FAINT, true, true)
+	best_row.add_child(best_label)
+	best_row.add_child(dist_label)
+	score_box.add_child(best_row)
 
-	var right_panel := _make_hud_panel(Vector2(1, 0), Vector2(-24, 20), Vector2(270, 104))
-	hud.add_child(right_panel)
-	var right_box := VBoxContainer.new()
-	right_box.add_theme_constant_override("separation", 1)
-	right_panel.add_child(right_box)
-	speed_label = Label.new()
-	speed_label.text = "0 km/h"
+	var speed_box := _corner_box(hud, Vector2(1, 0), Vector2(-36, 28), Vector2(300, 132), true, false)
+	speed_caption = _make_label("SPEED", 9, UI_MUTED, false, true)
+	speed_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	speed_box.add_child(speed_caption)
+	var speed_row := HBoxContainer.new()
+	speed_row.alignment = BoxContainer.ALIGNMENT_END
+	speed_row.add_theme_constant_override("separation", 8)
+	speed_label = _make_label("0", 46, UI_INK, true, false)
 	speed_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	speed_label.add_theme_font_size_override("font_size", 30)
-	right_box.add_child(speed_label)
-	status_label = Label.new()
-	status_label.text = "HUMAN"
+	speed_unit_label = _make_label("KM/H", 9, UI_FAINT, true, true)
+	speed_row.add_child(speed_label)
+	speed_row.add_child(speed_unit_label)
+	speed_box.add_child(speed_row)
+	status_label = _make_label("● HUMAN", 9, UI_MUTED, false, true)
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	status_label.add_theme_font_size_override("font_size", 12)
-	status_label.add_theme_color_override("font_color", Color(0.55, 0.66, 0.72))
-	right_box.add_child(status_label)
+	speed_box.add_child(status_label)
 	var record_row := HBoxContainer.new()
 	record_row.alignment = BoxContainer.ALIGNMENT_END
 	record_row.add_theme_constant_override("separation", 8)
-	right_box.add_child(record_row)
 	record_button = Button.new()
-	record_button.text = "Record"
-	record_button.custom_minimum_size = Vector2(88, 30)
+	record_button.text = "● REC"
+	record_button.name = "Record"
+	record_button.custom_minimum_size = Vector2(74, 26)
 	record_button.focus_mode = Control.FOCUS_NONE
+	record_button.add_theme_font_size_override("font_size", 10)
 	record_button.pressed.connect(_on_record_button_pressed)
 	record_row.add_child(record_button)
-	record_status_label = Label.new()
-	record_status_label.text = ""
+	record_status_label = _make_label("", 9, UI_FAINT, true, true)
 	record_status_label.custom_minimum_size = Vector2(120, 0)
 	record_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	record_status_label.add_theme_font_size_override("font_size", 11)
 	record_row.add_child(record_status_label)
+	speed_box.add_child(record_row)
 
-	var controls_panel := _make_hud_panel(Vector2(0, 1), Vector2(24, -24), Vector2(470, 40))
-	hud.add_child(controls_panel)
-	msg_label = Label.new()
-	msg_label.text = "A / D  steer     SPACE  brake     T  hand control     ESC  pause     F9  record     F11  fullscreen"
-	msg_label.add_theme_font_size_override("font_size", 12)
-	msg_label.add_theme_color_override("font_color", Color(0.62, 0.72, 0.78))
-	controls_panel.add_child(msg_label)
+	var controls_box := _corner_box(hud, Vector2(0, 1), Vector2(36, -28), Vector2(560, 42), false, true)
+	msg_label = _make_label("A / D  STEER     SPACE  BRAKE     T  HAND OVER     F9  RECORD", 9, UI_MUTED, false, true)
+	controls_box.add_child(msg_label)
+	var controls_hint := _make_label("ESC  PAUSE     F11  FULLSCREEN", 8, UI_FAINT, false, true)
+	controls_box.add_child(controls_hint)
 
-	ai_panel = _make_hud_panel(Vector2(1, 1), Vector2(-24, -24), Vector2(330, 92))
-	hud.add_child(ai_panel)
-	var ai_box := VBoxContainer.new()
-	ai_box.add_theme_constant_override("separation", 1)
-	ai_panel.add_child(ai_box)
-	ai_model_label = Label.new()
-	ai_model_label.text = "AI  HUMAN CONTROL"
-	ai_model_label.add_theme_font_size_override("font_size", 13)
-	ai_model_label.add_theme_color_override("font_color", Color(0.35, 0.9, 0.95))
+	var ai_box := _corner_box(hud, Vector2(1, 1), Vector2(-36, -28), Vector2(330, 132), true, true)
+	ai_panel = ai_box
+	ai_state_label = _make_label("● HUMAN", 9, UI_MUTED, false, true)
+	ai_state_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	ai_box.add_child(ai_state_label)
+	ai_model_label = _make_label("NO CONTROLLER", 9, UI_FAINT, false, true)
+	ai_model_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	ai_box.add_child(ai_model_label)
-	ai_action_label = Label.new()
-	ai_action_label.text = "ACTION  --"
-	ai_action_label.add_theme_font_size_override("font_size", 16)
-	ai_box.add_child(ai_action_label)
-	ai_latency_label = Label.new()
-	ai_latency_label.text = "LATENCY  --"
-	ai_latency_label.add_theme_font_size_override("font_size", 11)
-	ai_latency_label.add_theme_color_override("font_color", Color(0.55, 0.66, 0.72))
+	var action_row := HBoxContainer.new()
+	action_row.alignment = BoxContainer.ALIGNMENT_END
+	action_row.add_theme_constant_override("separation", 8)
+	ai_action_label = _make_label("--", 24, UI_INK, true, false)
+	ai_action_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	ai_prob_label = _make_label("", 12, UI_MUTED, true, true)
+	action_row.add_child(ai_action_label)
+	action_row.add_child(ai_prob_label)
+	ai_box.add_child(action_row)
+	ai_history = Control.new()
+	ai_history.custom_minimum_size = Vector2(140, 14)
+	ai_history.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ai_history.draw.connect(_draw_ai_history)
+	ai_box.add_child(ai_history)
+	ai_latency_label = _make_label("", 9, UI_FAINT, true, true)
+	ai_latency_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	ai_box.add_child(ai_latency_label)
-	conn_label = Label.new()
-	conn_label.text = "WS  disconnected"
-	conn_label.add_theme_font_size_override("font_size", 10)
-	conn_label.add_theme_color_override("font_color", Color(0.45, 0.55, 0.62))
+	conn_label = _make_label("LOCAL · 8766", 8, UI_FAINT, false, true)
+	conn_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	ai_box.add_child(conn_label)
 
-	notice_label = Label.new()
-	notice_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	notice_label.offset_top = 132
-	notice_label.offset_bottom = 162
+	notice_label = _make_label("", 10, UI_INK, false, true)
+	notice_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	notice_label.offset_left = -220
+	notice_label.offset_right = 220
+	notice_label.offset_top = -126
+	notice_label.offset_bottom = -104
 	notice_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	notice_label.add_theme_color_override("font_color", Color(0.4, 0.95, 0.85))
-	notice_label.add_theme_font_size_override("font_size", 20)
 	notice_label.visible = false
 	hud.add_child(notice_label)
 
-	countdown_label = Label.new()
+	countdown_label = _make_label("", 96, UI_INK, false, false)
 	countdown_label.set_anchors_preset(Control.PRESET_FULL_RECT)
 	countdown_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	countdown_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	countdown_label.add_theme_font_size_override("font_size", 96)
-	countdown_label.add_theme_color_override("font_color", Color(0.3, 0.95, 0.95))
 	countdown_label.visible = false
 	hud.add_child(countdown_label)
 
-	menu_panel = _make_panel("LANESHIFT", "THREE LANES. ONE MODEL.", ["Start", "Watch Kev", "Open Logs", "Quit"])
-	menu_panel.theme = ui_theme
+	menu_panel = _build_menu_panel(ui_theme)
 	ui_layer.add_child(menu_panel)
-	pause_panel = _make_panel("PAUSED", "", ["Resume", "Restart", "Menu"])
+	pause_panel = _make_panel("PAUSED", "The road waits.", ["Resume", "Restart", "Menu"], false)
 	pause_panel.theme = ui_theme
 	pause_panel.visible = false
 	ui_layer.add_child(pause_panel)
-	gameover_panel = _make_panel("GAME OVER", "", ["Restart", "Menu"])
+	gameover_panel = _make_panel("RUN ENDED", "Every run is recorded.", ["Restart", "Menu"], true)
 	gameover_panel.theme = ui_theme
 	gameover_panel.visible = false
 	ui_layer.add_child(gameover_panel)
 	gameover_result_label = gameover_panel.find_child("Result", true, false) as Label
-	if gameover_result_label == null:
-		gameover_result_label = Label.new()
-		gameover_result_label.name = "Result"
-		gameover_result_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		(gameover_panel.get_child(0) as VBoxContainer).add_child(gameover_result_label)
 
 	_set_state("menu")
 	_wire_menu()
 
 func _make_theme() -> Theme:
 	var theme := Theme.new()
-	theme.set_color("font_color", "Label", Color(0.88, 0.94, 0.98))
-	theme.set_color("font_color", "Button", Color(0.9, 0.97, 1.0))
-	theme.set_font_size("font_size", "Label", 15)
-	theme.set_font_size("font_size", "Button", 17)
+	sans_font = SystemFont.new()
+	sans_font.font_names = PackedStringArray(["Segoe UI", "Inter", "Helvetica Neue", "Arial"])
+	mono_font = SystemFont.new()
+	mono_font.font_names = PackedStringArray(["Cascadia Mono", "Consolas", "Menlo", "monospace"])
+	theme.default_font = sans_font
+	theme.default_font_size = 13
+	theme.set_color("font_color", "Label", UI_INK)
+	theme.set_color("font_color", "Button", UI_INK)
+	theme.set_font_size("font_size", "Label", 13)
+	theme.set_font_size("font_size", "Button", 15)
 	theme.set_constant("separation", "HBoxContainer", 8)
 	theme.set_constant("separation", "VBoxContainer", 8)
 	var panel_style := StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.02, 0.05, 0.08, 0.88)
-	panel_style.border_color = Color(0.1, 0.55, 0.62, 0.5)
+	panel_style.bg_color = Color(0.012, 0.026, 0.04, 0.86)
+	panel_style.border_color = Color(1.0, 1.0, 1.0, 0.10)
 	panel_style.set_border_width_all(1)
-	panel_style.set_corner_radius_all(10)
-	panel_style.content_margin_left = 14
-	panel_style.content_margin_right = 14
-	panel_style.content_margin_top = 10
-	panel_style.content_margin_bottom = 10
+	panel_style.set_corner_radius_all(4)
+	panel_style.content_margin_left = 28
+	panel_style.content_margin_right = 28
+	panel_style.content_margin_top = 24
+	panel_style.content_margin_bottom = 24
 	theme.set_stylebox("panel", "PanelContainer", panel_style)
 	var button_style := StyleBoxFlat.new()
-	button_style.bg_color = Color(0.04, 0.13, 0.17)
-	button_style.set_corner_radius_all(6)
-	button_style.content_margin_left = 12
-	button_style.content_margin_right = 12
-	button_style.content_margin_top = 7
-	button_style.content_margin_bottom = 7
+	button_style.bg_color = Color(1.0, 1.0, 1.0, 0.035)
+	button_style.set_corner_radius_all(4)
+	button_style.content_margin_left = 14
+	button_style.content_margin_right = 14
+	button_style.content_margin_top = 9
+	button_style.content_margin_bottom = 9
 	var button_hover := button_style.duplicate()
-	button_hover.bg_color = Color(0.06, 0.3, 0.35)
+	button_hover.bg_color = Color(1.0, 1.0, 1.0, 0.08)
 	var button_pressed := button_style.duplicate()
-	button_pressed.bg_color = Color(0.04, 0.5, 0.55)
+	button_pressed.bg_color = Color(UI_ACCENT, 0.14)
+	var focus_style := StyleBoxFlat.new()
+	focus_style.bg_color = Color(0, 0, 0, 0)
+	focus_style.border_color = UI_ACCENT
+	focus_style.set_border_width_all(1)
+	focus_style.set_corner_radius_all(4)
 	theme.set_stylebox("normal", "Button", button_style)
 	theme.set_stylebox("hover", "Button", button_hover)
 	theme.set_stylebox("pressed", "Button", button_pressed)
-	var focus_style := button_style.duplicate()
-	focus_style.bg_color = Color(0.08, 0.4, 0.46)
 	theme.set_stylebox("focus", "Button", focus_style)
 	return theme
 
-func _make_hud_panel(anchor: Vector2, offset: Vector2, panel_size: Vector2) -> PanelContainer:
-	var panel := PanelContainer.new()
-	panel.anchor_left = anchor.x
-	panel.anchor_right = anchor.x
-	panel.anchor_top = anchor.y
-	panel.anchor_bottom = anchor.y
-	if anchor.x > 0.5:
-		panel.offset_left = offset.x - panel_size.x
-		panel.offset_right = offset.x
-		panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	else:
-		panel.offset_left = offset.x
-		panel.offset_right = offset.x + panel_size.x
-	if anchor.y > 0.5:
-		panel.offset_top = offset.y - panel_size.y
-		panel.offset_bottom = offset.y
-		panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	else:
-		panel.offset_top = offset.y
-		panel.offset_bottom = offset.y + panel_size.y
-	panel.custom_minimum_size = panel_size
+func _build_menu_panel(ui_theme: Theme) -> Control:
+	var panel := Control.new()
+	panel.name = "Menu"
+	panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	panel.mouse_filter = Control.MOUSE_FILTER_PASS
+	panel.theme = ui_theme
+
+	var block := VBoxContainer.new()
+	block.set_anchors_preset(Control.PRESET_CENTER_LEFT)
+	block.offset_left = 96
+	block.offset_right = 656
+	block.offset_top = -240
+	block.offset_bottom = 220
+	block.add_theme_constant_override("separation", 10)
+	panel.add_child(block)
+
+	var eyebrow := _make_label("AN INSTRUMENTED DRIVING TESTBED", 9, UI_MUTED, false, true)
+	block.add_child(eyebrow)
+	var title := _make_label("LANESHIFT", 64, UI_INK, false, false)
+	block.add_child(title)
+	var tagline := _make_label("A small decision-model testbed.\nEvery run is recorded locally.", 15, UI_MUTED, false, false)
+	tagline.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tagline.custom_minimum_size = Vector2(480, 0)
+	block.add_child(tagline)
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(0, 22)
+	block.add_child(spacer)
+
+	var start := _make_button("Start a run  →", "Start", true)
+	start.custom_minimum_size = Vector2(240, 46)
+	start.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	block.add_child(start)
+	var secondary := HBoxContainer.new()
+	secondary.add_theme_constant_override("separation", 6)
+	for spec in [["Watch Kev", "Watch Kev"], ["Open Logs", "Open Logs"], ["Quit", "Quit"]]:
+		var btn := _make_button(spec[0], spec[1], false)
+		btn.custom_minimum_size = Vector2(0, 30)
+		secondary.add_child(btn)
+	block.add_child(secondary)
+	menu_status_label = _make_label("", 9, UI_MUTED, false, true)
+	block.add_child(menu_status_label)
+	var footer_spacer := Control.new()
+	footer_spacer.custom_minimum_size = Vector2(0, 14)
+	block.add_child(footer_spacer)
+	var footer := _make_label("LOCAL SIMULATION · EVERY RUN RECORDED · v0.1", 8, UI_FAINT, false, true)
+	block.add_child(footer)
 	return panel
 
-func _make_panel(title: String, tagline: String, buttons: Array) -> Control:
+func _make_panel(title: String, tagline: String, buttons: Array, show_result: bool) -> Control:
 	var panel := PanelContainer.new()
-	var panel_size := Vector2(420, 200.0 + buttons.size() * 48.0)
+	var panel_size := Vector2(440, 230.0 + buttons.size() * 50.0)
 	panel.anchor_left = 0.5
 	panel.anchor_right = 0.5
 	panel.anchor_top = 0.5
@@ -703,43 +785,124 @@ func _make_panel(title: String, tagline: String, buttons: Array) -> Control:
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 10)
 	panel.add_child(vbox)
-	var t := Label.new()
-	t.text = title
+	var t := _make_label(title, 30, UI_INK, false, true)
 	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	t.add_theme_color_override("font_color", Color(0.35, 0.91, 0.94))
-	t.add_theme_font_size_override("font_size", 36)
 	vbox.add_child(t)
 	if tagline != "":
-		var tag := Label.new()
-		tag.text = tagline
+		var tag := _make_label(tagline, 12, UI_MUTED, false, false)
 		tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		tag.add_theme_color_override("font_color", Color(0.55, 0.68, 0.74))
-		tag.add_theme_font_size_override("font_size", 12)
 		vbox.add_child(tag)
-	if title == "GAME OVER":
-		gameover_result_label = Label.new()
+	if show_result:
+		gameover_result_label = _make_label("", 13, UI_INK, false, false)
 		gameover_result_label.name = "Result"
 		gameover_result_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		gameover_result_label.add_theme_color_override("font_color", Color(1.0, 0.55, 0.45))
-		gameover_result_label.add_theme_font_size_override("font_size", 14)
-		gameover_result_label.text = ""
 		vbox.add_child(gameover_result_label)
+	if title == "PAUSED":
+		var controls := _make_label("A / D  STEER     SPACE  BRAKE     T  HAND OVER", 9, UI_FAINT, false, true)
+		controls.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		vbox.add_child(controls)
 	for bname in buttons:
-		var btn := Button.new()
-		btn.text = bname
-		btn.name = bname
-		btn.custom_minimum_size = Vector2(260, 44)
-		btn.focus_mode = Control.FOCUS_ALL
+		var btn := _make_button(bname, bname, bname in ["Resume", "Restart"])
+		btn.custom_minimum_size = Vector2(280, 42)
 		vbox.add_child(btn)
 	return panel
 
+func _make_button(text: String, button_name: String, primary: bool) -> Button:
+	var btn := Button.new()
+	btn.text = text
+	btn.name = button_name
+	btn.focus_mode = Control.FOCUS_ALL
+	btn.add_theme_font_size_override("font_size", 15)
+	if primary:
+		var fill := StyleBoxFlat.new()
+		fill.bg_color = UI_ACCENT
+		fill.set_corner_radius_all(4)
+		fill.content_margin_left = 16
+		fill.content_margin_right = 16
+		fill.content_margin_top = 10
+		fill.content_margin_bottom = 10
+		var hover := fill.duplicate()
+		hover.bg_color = UI_ACCENT.lightened(0.08)
+		var pressed := fill.duplicate()
+		pressed.bg_color = UI_ACCENT.darkened(0.12)
+		btn.add_theme_stylebox_override("normal", fill)
+		btn.add_theme_stylebox_override("hover", hover)
+		btn.add_theme_stylebox_override("pressed", pressed)
+		btn.add_theme_color_override("font_color", Color(0.01, 0.04, 0.05))
+		btn.add_theme_color_override("font_hover_color", Color(0.01, 0.04, 0.05))
+	else:
+		btn.add_theme_color_override("font_color", UI_MUTED)
+		btn.add_theme_color_override("font_hover_color", UI_INK)
+	return btn
+
+func _make_label(text: String, font_size: int, color: Color, mono: bool, caps: bool) -> Label:
+	var label := Label.new()
+	label.text = text.to_upper() if caps else text
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_color", color)
+	if mono and mono_font != null:
+		label.add_theme_font_override("font", mono_font)
+	return label
+
+func _corner_box(parent: Control, anchor: Vector2, offset: Vector2, box_size: Vector2, right: bool, bottom: bool) -> VBoxContainer:
+	var box := VBoxContainer.new()
+	box.anchor_left = anchor.x
+	box.anchor_right = anchor.x
+	box.anchor_top = anchor.y
+	box.anchor_bottom = anchor.y
+	box.add_theme_constant_override("separation", 2)
+	if right:
+		box.offset_left = offset.x - box_size.x
+		box.offset_right = offset.x
+		box.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	else:
+		box.offset_left = offset.x
+		box.offset_right = offset.x + box_size.x
+	if bottom:
+		box.offset_top = offset.y - box_size.y
+		box.offset_bottom = offset.y
+		box.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	else:
+		box.offset_top = offset.y
+		box.offset_bottom = offset.y + box_size.y
+	box.custom_minimum_size = box_size
+	parent.add_child(box)
+	return box
+
+func _add_scrim(parent: Control, top: bool, height: float) -> void:
+	var rect := TextureRect.new()
+	rect.set_anchors_preset(Control.PRESET_TOP_WIDE if top else Control.PRESET_BOTTOM_WIDE)
+	rect.offset_top = 0 if top else -height
+	rect.offset_bottom = height if top else 0
+	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	rect.stretch_mode = TextureRect.STRETCH_SCALE
+	rect.texture = _gradient_texture(
+		Color(0.005, 0.012, 0.022, 0.82) if top else Color(0.005, 0.012, 0.022, 0.0),
+		Color(0.005, 0.012, 0.022, 0.0) if top else Color(0.005, 0.012, 0.022, 0.86),
+		false
+	)
+	parent.add_child(rect)
+
+func _gradient_texture(from: Color, to: Color, horizontal: bool) -> GradientTexture2D:
+	var gradient := Gradient.new()
+	gradient.set_color(0, from)
+	gradient.set_color(1, to)
+	var texture := GradientTexture2D.new()
+	texture.gradient = gradient
+	texture.width = 128 if horizontal else 1
+	texture.height = 1 if horizontal else 128
+	texture.fill_from = Vector2.ZERO
+	texture.fill_to = Vector2.RIGHT if horizontal else Vector2.DOWN
+	return texture
+
 func _wire_menu() -> void:
 	for btn in _find_buttons(menu_panel):
-		btn.pressed.connect(func(): _on_menu_button(btn.text))
+		btn.pressed.connect(func(): _on_menu_button(btn.name))
 	for btn in _find_buttons(pause_panel):
-		btn.pressed.connect(func(): _on_pause_button(btn.text))
+		btn.pressed.connect(func(): _on_pause_button(btn.name))
 	for btn in _find_buttons(gameover_panel):
-		btn.pressed.connect(func(): _on_gameover_button(btn.text))
+		btn.pressed.connect(func(): _on_gameover_button(btn.name))
 
 func _set_state(next: String) -> void:
 	state = next
@@ -747,17 +910,48 @@ func _set_state(next: String) -> void:
 	pause_panel.visible = next == "paused"
 	gameover_panel.visible = next == "gameover" and crash_hold <= 0.0
 	hud.visible = next == "playing" or next == "countdown"
-	menu_backdrop.visible = next == "menu" or next == "paused" or next == "gameover"
+	menu_backdrop.visible = next == "menu"
+	modal_scrim.visible = next == "paused" or next == "gameover"
 	countdown_label.visible = next == "countdown"
 	get_tree().paused = next == "paused"
 	if next == "playing" or next == "countdown":
 		get_viewport().gui_release_focus()
 	elif next == "menu":
+		_update_menu_status()
 		_focus_button(menu_panel, "Start")
 	elif next == "paused":
 		_focus_button(pause_panel, "Resume")
 	elif next == "gameover" and gameover_panel.visible:
 		_focus_button(gameover_panel, "Restart")
+
+func _update_menu_status() -> void:
+	if menu_status_label == null:
+		return
+	var connected := net != null and net.connected_flag
+	menu_status_label.text = "LOCAL KEV READY · 8766" if connected else "CONTROLLER OFFLINE · RUN PLAY-KEV.BAT"
+	menu_status_label.add_theme_color_override("font_color", UI_ACCENT if connected else UI_WARN)
+	var watch := menu_panel.find_child("Watch Kev", true, false)
+	if watch is Button:
+		watch.disabled = not connected
+
+func _draw_ai_history() -> void:
+	if ai_history == null:
+		return
+	var count := mini(12, ai_history_actions.size())
+	for i in range(count):
+		var action := String(ai_history_actions[ai_history_actions.size() - 1 - i])
+		var color := UI_FAINT
+		var offset := 0.0
+		match action:
+			"LEFT":
+				color = UI_ACCENT
+				offset = -3.0
+			"RIGHT":
+				color = UI_ACCENT
+				offset = 3.0
+			"BRAKE":
+				color = UI_WARN
+		ai_history.draw_circle(Vector2(ai_history.size.x - 6.0 - i * 9.0, 7.0 + offset), 2.0, color)
 
 func _focus_button(panel: Control, button_name: String) -> void:
 	var target := panel.find_child(button_name, true, false)
@@ -845,6 +1039,14 @@ func start_game(seed: int = -1, cfg: Dictionary = {}, requested_episode_id: Stri
 	_log_event("episode_start", {"scenario_seed": seed, "config": active_config})
 	crash_hold = 0.0
 	crash_flash = 0.0
+	lane_flash = 0.0
+	score_flash = 0.0
+	onboarding_timer = 8.0
+	ai_history_actions.clear()
+	if ai_history != null:
+		ai_history.queue_redraw()
+	if msg_label != null:
+		msg_label.visible = true
 	if countdown_seconds > 0.0:
 		countdown_timer = countdown_seconds
 		countdown_label.text = str(int(ceil(countdown_timer)))
@@ -883,9 +1085,12 @@ func _on_crashed(_eid: String) -> void:
 	_log_event("collision", {"collision_count": sim.collision_count})
 
 func _on_vehicle_overtaken(vehicle_id: String) -> void:
-	notice_label.text = "CLEAN PASS  +25"
+	notice_label.text = "OVERTAKE  +25"
 	notice_label.visible = true
-	notice_timer = 1.1
+	notice_label.modulate.a = 1.0
+	notice_timer = 1.2
+	score_flash = 1.0
+	_update_hud()
 	_log_event("vehicle_overtaken", {"vehicle_id": vehicle_id, "score": sim.score})
 
 func _on_episode_ended(summary: Dictionary) -> void:
@@ -908,7 +1113,11 @@ func _on_episode_ended(summary: Dictionary) -> void:
 	else:
 		if String(summary.get("termination_reason", "")) != "crash":
 			crash_hold = 0.0
-		gameover_result_label.text = "Score %.0f   Distance %.0f m\nSurvived %.1f s" % [summary["score"], summary["distance"], summary["survival_time"]]
+		gameover_result_label.text = "Score %.0f  ·  %.0f m  ·  %.1f s\nSEED %d  ·  %s" % [
+			summary["score"], summary["distance"], summary["survival_time"],
+			int(summary.get("scenario_seed", sim.seed_value)),
+			String(summary.get("control_source", sim.control_source)).to_upper()
+		]
 		_set_state("gameover")
 		_update_ai_status()
 
@@ -979,17 +1188,19 @@ func _on_net_reset(seed: int, cfg: Dictionary, episode_id: String) -> void:
 	_update_ai_status()
 
 func _on_net_connected() -> void:
-	conn_label.text = "WS  connected"
+	conn_label.text = "LOCAL · 8766"
 	_log_event("controller_connected", {})
 	_update_ai_status()
+	_update_menu_status()
 
 func _on_net_disconnected() -> void:
-	conn_label.text = "WS  disconnected"
+	conn_label.text = "LOCAL · OFFLINE"
 	if not auto_run:
 		external_control = false
 		control_mode = "human"
 	_log_event("controller_disconnected", {})
 	_update_ai_status()
+	_update_menu_status()
 
 func _submit_action(action: String, duration: float, control_source: String, label_source: String, controller_seq: int = -1, state_tick: int = -1, decision_state: Dictionary = {}, decision_metadata: Dictionary = {}, count_action: bool = true) -> bool:
 	var application_state: Dictionary = sim.get_snapshot()
@@ -998,6 +1209,7 @@ func _submit_action(action: String, duration: float, control_source: String, lab
 	var application_tick := sim.physics_tick
 	var accepted: bool = sim.apply_action(action, duration, control_source, count_action)
 	if accepted and action in ["LEFT", "RIGHT"]:
+		lane_flash = 1.0
 		_play_sfx(_make_wav(_noise_samples(0.12, 1.6, 520.0), false))
 	action_event_sequence += 1
 	var applied_action := action if accepted else sim.current_action
@@ -1077,6 +1289,12 @@ func _physics_process(delta: float) -> void:
 			shake_offset = Vector2.ZERO
 	if crash_flash > 0.0:
 		crash_flash = maxf(0.0, crash_flash - delta * 0.9)
+	lane_flash = maxf(0.0, lane_flash - delta * 2.5)
+	score_flash = maxf(0.0, score_flash - delta * 1.5)
+	if onboarding_timer > 0.0:
+		onboarding_timer = maxf(0.0, onboarding_timer - delta)
+		if msg_label != null:
+			msg_label.visible = onboarding_timer > 0.0
 	if state == "gameover" and crash_hold > 0.0:
 		crash_hold = maxf(0.0, crash_hold - delta)
 		if crash_hold <= 0.0:
@@ -1154,6 +1372,7 @@ func _input(event: InputEvent) -> void:
 func _process(_delta: float) -> void:
 	if state == "menu":
 		menu_scroll += _delta * 12.0
+		_update_menu_status()
 	if _key_just_pressed(KEY_F9):
 		_toggle_recording()
 	if _key_just_pressed(KEY_F11):
@@ -1182,7 +1401,6 @@ func _process(_delta: float) -> void:
 			else:
 				_log_event("control_mode_change_rejected", {"requested_control_mode": "external", "reason": "controller_disconnected"})
 		_update_ai_status()
-	conn_label.text = "WS  " + ("connected" if net.connected_flag else "disconnected")
 	if state == "playing" and take_control_on_start and net.connected_flag and not external_control:
 		external_control = true
 		control_mode = "external"
@@ -1201,7 +1419,9 @@ func _process(_delta: float) -> void:
 		if telemetry != null:
 			samples = telemetry.telemetry_record_count
 			events = telemetry.event_record_count
-		record_status_label.text = "REC %.1fs  %d samples  %d events" % [elapsed, samples, events]
+		record_status_label.text = "REC %.1fs  ·  %d  ·  %d" % [elapsed, samples, events]
+	if notice_timer > 0.0:
+		notice_label.modulate.a = clampf(notice_timer * 2.0, 0.0, 1.0)
 	if shake_timer > 0.0:
 		shake_offset = Vector2(randf_range(-shake_intensity, shake_intensity), randf_range(-shake_intensity, shake_intensity)) * 4.0
 	_update_audio()
@@ -1322,36 +1542,50 @@ func _update_record_ui() -> void:
 	if record_button == null:
 		return
 	if recording_active:
-		record_button.text = "Stop"
+		record_button.text = "■ STOP"
 		record_status_label.text = "REC"
-		record_status_label.add_theme_color_override("font_color", Color(1.0, 0.35, 0.3))
+		record_status_label.add_theme_color_override("font_color", UI_DANGER)
 	else:
-		record_button.text = "Record"
+		record_button.text = "● REC"
 		record_status_label.text = ""
-		record_status_label.add_theme_color_override("font_color", Color(0.55, 0.66, 0.72))
+		record_status_label.add_theme_color_override("font_color", UI_FAINT)
 
 func _update_hud() -> void:
 	score_label.text = "%.0f" % sim.score
 	best_label.text = "BEST %.0f" % best_score
-	dist_label.text = "%.0f m" % sim.distance
-	speed_label.text = "%.0f km/h" % (sim.player_speed * 3.6)
-	status_label.text = "CONTROL  " + control_mode.to_upper()
+	dist_label.text = "%.0f M" % sim.distance
+	speed_label.text = "%.0f" % (sim.player_speed * 3.6)
+	status_label.text = "● " + control_mode.to_upper()
+	status_label.add_theme_color_override("font_color", UI_ACCENT if external_control or auto_run else UI_MUTED)
+	score_label.add_theme_color_override("font_color", UI_INK.lerp(UI_ACCENT, clampf(score_flash, 0.0, 1.0) * 0.65))
 
 func _update_ai_status() -> void:
 	if ai_model_label == null:
 		return
 	if net == null or not net.connected_flag:
-		ai_model_label.text = "AI  OFFLINE" if external_control else "AI  HUMAN CONTROL"
-		ai_action_label.text = "ACTION  --"
-		ai_latency_label.text = "LATENCY  --"
+		ai_state_label.text = "● OFFLINE"
+		ai_state_label.add_theme_color_override("font_color", UI_WARN)
+		ai_model_label.text = "NO CONTROLLER"
+		ai_action_label.text = "--"
+		ai_prob_label.text = ""
+		ai_latency_label.text = ""
+		conn_label.text = "LOCAL · OFFLINE"
 	elif external_control or auto_run:
-		ai_model_label.text = "AI  " + ("AUTO" if auto_run else "EXTERNAL CONTROL")
-		ai_action_label.text = "ACTION  waiting"
-		ai_latency_label.text = "MODEL  loading"
+		ai_state_label.text = "● " + ("AUTO" if auto_run else "EXTERNAL")
+		ai_state_label.add_theme_color_override("font_color", UI_ACCENT)
+		ai_model_label.text = "KEV-ONNX · 0.8B"
+		ai_action_label.text = "WAITING"
+		ai_prob_label.text = ""
+		ai_latency_label.text = ""
+		conn_label.text = "LOCAL · 8766"
 	else:
-		ai_model_label.text = "AI  READY"
-		ai_action_label.text = "ACTION  --"
+		ai_state_label.text = "● HUMAN"
+		ai_state_label.add_theme_color_override("font_color", UI_MUTED)
+		ai_model_label.text = "CONTROLLER READY"
+		ai_action_label.text = "--"
+		ai_prob_label.text = ""
 		ai_latency_label.text = "PRESS T TO HAND OVER"
+		conn_label.text = "LOCAL · 8766"
 
 func _build_audio() -> void:
 	if DisplayServer.get_name() == "headless":
@@ -1426,18 +1660,31 @@ func _update_ai_panel(action: String, label_source: String, metadata: Dictionary
 	var model_text := String(metadata.get("model_alias", metadata.get("model_id", label_source)))
 	if label_source == "controller_fallback":
 		model_text = "FALLBACK"
+		ai_state_label.text = "● FALLBACK"
+		ai_state_label.add_theme_color_override("font_color", UI_WARN)
 	elif label_source == "human":
 		model_text = "HUMAN CONTROL"
-	ai_model_label.text = "AI  " + model_text
+		ai_state_label.text = "● HUMAN"
+		ai_state_label.add_theme_color_override("font_color", UI_MUTED)
+	else:
+		ai_state_label.text = "● EXTERNAL"
+		ai_state_label.add_theme_color_override("font_color", UI_ACCENT)
+	ai_model_label.text = model_text.to_upper()
 	var probabilities = metadata.get("probabilities", {})
 	var probability := 0.0
 	if typeof(probabilities) == TYPE_DICTIONARY:
 		probability = float(probabilities.get(action, metadata.get("confidence", 0.0)))
 	elif metadata.has("confidence"):
 		probability = float(metadata.get("confidence", 0.0))
-	ai_action_label.text = "ACTION  %s   %d%%" % [action, int(round(probability * 100.0))]
+	ai_action_label.text = action
+	ai_prob_label.text = "%d%%" % int(round(probability * 100.0))
 	var latency := float(metadata.get("model_latency_ms", metadata.get("client_latency_ms", 0.0)))
-	ai_latency_label.text = "LATENCY  %.0f ms" % latency
+	ai_latency_label.text = "%.2f S" % (latency / 1000.0)
+	ai_history_actions.append(action)
+	while ai_history_actions.size() > 12:
+		ai_history_actions.pop_front()
+	ai_history.queue_redraw()
+	conn_label.text = "LOCAL · 8766"
 
 func _load_highscore() -> void:
 	var f := FileAccess.open(highscore_path, FileAccess.READ)
