@@ -11,7 +11,7 @@ The project is intended to support experiments in fine-tuning compact decision m
 What works today:
 
 - A playable Godot driving simulator with human keyboard controls, a title screen, HUD, pause, game over and restart.
-- A coherent pseudo-perspective road, lane geometry, traffic sprites, crash feedback and corner HUD (the earlier full-width toolbar and lane markings through cars are gone).
+- A coherent pseudo-perspective road with depth fog, lane geometry, traffic sprites, crash feedback, a typographic corner HUD, and a left-aligned title composition over the live road. The earlier full-width toolbar, bordered HUD cards and lane markings through cars are gone.
 - Simulation-state export and periodic telemetry at roughly 30 Hz of simulation time. Recording works after a run has already started; the integration test covers that path.
 - Event-based action and episode logs.
 - A Python controller communicating with the game over a localhost WebSocket.
@@ -77,7 +77,9 @@ PLAY-KEV.bat -Windowed
 PLAY-KEV.bat -Episodes 10 -EpisodeDuration 20
 ```
 
-The controller starts on port `8766`, waits for the model to load, then launches the game in auto-run with Kev in control. The bottom-right panel shows the model alias, the chosen action, the probability and the inference latency. The player has a cyan ring while the external controller has control. Close the game window to stop both processes.
+The controller starts on port `8766`, waits for the model to load, then launches the game in auto-run with Kev in control. The bottom-right instrument shows the model alias, the chosen action, the probability and the inference latency. The player has a cyan ring while the external controller has control. Close the game window to stop both processes.
+
+The packaged build can be extracted to `R:`. ONNX Runtime cannot validate the external-data path on that RAM disk, so the controller loads the 1.5 GB weight blob into memory with conservative session options. The first load can take 30–90 seconds; the launcher waits for it. The extracted-on-`R:` test accepted real Kev decisions with `control_source=original_model`. Inference is slower on that path, around 4.5 s per decision.
 
 The controller log is written to `logs\kev-controller.log`.
 
