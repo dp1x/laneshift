@@ -28,8 +28,12 @@ def _round(value: Any, digits: int = 2) -> float | None:
     return round(float(value), digits)
 
 
-def compact_kev_state(state: dict[str, Any]) -> dict[str, Any]:
-    """Project a game state snapshot into the shape the model receives."""
+def compact_kev_state(state: dict[str, Any], max_vehicles: int = 5) -> dict[str, Any]:
+    """Project a game state snapshot into the shape the model receives.
+
+    Traffic is ordered by absolute distance and capped so the nearest vehicle
+    is always present, even when the prompt is truncated to fit a small graph.
+    """
     player = state.get("player")
     traffic = state.get("traffic")
     legal_actions = state.get("legal_actions")
@@ -44,7 +48,7 @@ def compact_kev_state(state: dict[str, Any]) -> dict[str, Any]:
     ):
         raise ValueError("decision state has no valid authoritative legal_actions set")
 
-    vehicles = []
+    candidates = []
     player_lane = player.get("lane")
     for vehicle in traffic:
         if not isinstance(vehicle, dict):
@@ -55,14 +59,20 @@ def compact_kev_state(state: dict[str, Any]) -> dict[str, Any]:
         ttc = None
         if same_lane and isinstance(distance, float) and isinstance(closing, float) and distance > 0.0 and closing > 0.0:
             ttc = round(distance / closing, 2)
-        vehicles.append({
+        candidates.append({
             "id": vehicle.get("id"),
             "lane": vehicle.get("lane"),
             "relative_distance": distance,
             "relative_speed": closing,
             "in_player_lane": same_lane,
             "time_to_collision": ttc,
+            "_sort_distance": abs(distance) if isinstance(distance, float) else 1_000_000.0,
         })
+    candidates.sort(key=lambda item: item["_sort_distance"])
+    vehicles = []
+    for item in candidates[: max(1, int(max_vehicles))]:
+        item.pop("_sort_distance", None)
+        vehicles.append(item)
 
     return {
         "episode_id": state.get("episode_id"),

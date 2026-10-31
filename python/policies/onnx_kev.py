@@ -9,6 +9,7 @@ with each option span and a final decide token.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import math
 import os
 import re
@@ -48,7 +49,17 @@ def _user_tokens(tok: Tokenizer, text: str) -> list[int]:
 
 
 class OnnxKevPolicy:
-    def __init__(self, model_path: str, tokenizer_path: str, length: int = 256, intra_threads: int | None = None, data_path: str | None = None, arena: bool = False):
+    def __init__(
+        self,
+        model_path: str,
+        tokenizer_path: str,
+        length: int = 256,
+        intra_threads: int | None = None,
+        data_path: str | None = None,
+        arena: bool = False,
+        model_id: str = "",
+        label_source: str = "original_model",
+    ):
         self.model_path = str(Path(model_path))
         self.tokenizer_path = str(Path(tokenizer_path))
         self.data_path = str(Path(data_path)) if data_path else ""
@@ -57,15 +68,17 @@ class OnnxKevPolicy:
         self.arena = bool(arena)
         self.tok: Tokenizer | None = None
         self.session: ort.InferenceSession | None = None
-        self.label_source = "original_model"
+        self.label_source = label_source if label_source in {"original_model", "fine_tuned_model"} else "original_model"
         self.policy_name = "onnx_kev"
-        self.model_id = "jaredpalmer/kev-0.8b@v1.0+onnx-fp16"
+        self.model_id = model_id or "jaredpalmer/kev-0.8b@v1.0+onnx"
         self.model_alias = "kev-onnx"
+        self.model_sha256 = ""
         self.state_token_limit = max(8, self.length - 96)
         self.last_encoding: dict[str, Any] = {}
 
     async def start(self) -> None:
         self.tok = Tokenizer.from_file(self.tokenizer_path)
+        self.model_sha256 = hashlib.sha256(Path(self.model_path).read_bytes()).hexdigest()
         blob_path = Path(self.data_path) if self.data_path else Path(self.model_path).with_name("kev07b_fp16.data")
         last_error: Exception | None = None
         # Fast path first (more threads + arena), then progressively more
@@ -173,6 +186,7 @@ class OnnxKevPolicy:
             policy_name=self.policy_name,
             model_id=self.model_id,
             model_alias=self.model_alias,
+            model_sha256=self.model_sha256,
             probabilities=probabilities,
             confidence=probabilities[action],
             model_latency_ms=model_ms,

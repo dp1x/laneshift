@@ -23,6 +23,7 @@ var flush_interval: float = 0.25
 var flush_timer: float = 0.0
 var telemetry_count: int = 0
 var enabled: bool = true
+var session_active: bool = false
 var warned_paths: Dictionary = {}
 var write_failures: int = 0
 var writer_thread: Thread
@@ -41,6 +42,26 @@ var recovery_files: Array[String] = []
 var degraded: bool = false
 
 func start_session(base_dir: String = "") -> void:
+	if writer_thread != null and writer_thread.is_started():
+		writer_mutex.lock()
+		writer_stopping = true
+		writer_mutex.unlock()
+		writer_semaphore.post()
+		writer_thread.wait_to_finish()
+		writer_thread = null
+	enabled = true
+	writer_closed = false
+	writer_stopping = false
+	writer_error = ""
+	degraded = false
+	write_failures = 0
+	dropped_records = 0
+	recovered_batches = 0
+	unrecovered_batches = 0
+	recovery_files.clear()
+	warned_paths.clear()
+	flush_timer = 0.0
+	session_active = false
 	if base_dir == "":
 		base_dir = PortablePathsScript.get_recordings_root()
 	output_base_dir = base_dir
@@ -60,6 +81,7 @@ func start_session(base_dir: String = "") -> void:
 		_warn_write_failure(session_dir, "could not start telemetry writer thread")
 		enabled = false
 		return
+	session_active = true
 	telemetry_buffer.clear()
 	events_buffer.clear()
 	episodes_buffer.clear()
@@ -75,7 +97,7 @@ func start_session(base_dir: String = "") -> void:
 	_write_manifest("recording")
 
 func log_telemetry(snapshot: Dictionary) -> void:
-	if not enabled:
+	if not enabled or not session_active:
 		return
 	telemetry_buffer.append(snapshot)
 	telemetry_record_count += 1
@@ -84,7 +106,7 @@ func log_telemetry(snapshot: Dictionary) -> void:
 		telemetry_buffer = []
 
 func log_event(event: Dictionary) -> void:
-	if not enabled:
+	if not enabled or not session_active:
 		return
 	events_buffer.append(event)
 	event_record_count += 1
@@ -93,14 +115,14 @@ func log_event(event: Dictionary) -> void:
 		events_buffer = []
 
 func log_episode(summary: Dictionary) -> void:
-	if not enabled:
+	if not enabled or not session_active:
 		return
 	episodes_buffer.append(summary)
 	episode_record_count += 1
 	flush()
 
 func tick(delta: float) -> void:
-	if not enabled or writer_closed:
+	if not enabled or writer_closed or not session_active:
 		return
 	flush_timer += delta
 	if flush_timer >= flush_interval:
@@ -109,7 +131,7 @@ func tick(delta: float) -> void:
 		_report_writer_error()
 
 func flush() -> void:
-	if writer_closed:
+	if writer_closed or not session_active:
 		telemetry_buffer.clear()
 		events_buffer.clear()
 		episodes_buffer.clear()
@@ -125,7 +147,7 @@ func flush() -> void:
 		episodes_buffer = []
 
 func _queue_records(filename: String, records: Array) -> bool:
-	if writer_closed:
+	if writer_closed or not session_active:
 		return false
 	if writer_thread == null or not writer_thread.is_started():
 		_mark_queue_failure("telemetry writer is not available", records.size())
@@ -188,7 +210,7 @@ func _write_batch(batch: Dictionary) -> bool:
 	return false
 
 func _persist_recovery_batch(batch: Dictionary, original_error: String) -> bool:
-	var recovery_dir := ProjectSettings.globalize_path("user://runs/_recovery/%s" % session_id)
+	var recovery_dir := output_base_dir.path_join("_recovery").path_join(session_id)
 	if DirAccess.make_dir_recursive_absolute(recovery_dir) != OK:
 		return false
 	var filename := String(batch["filename"]).get_basename() + ".jsonl"
@@ -245,7 +267,7 @@ func _report_writer_error() -> void:
 		push_warning("LaneShift telemetry: " + message)
 
 func close() -> void:
-	if writer_closed:
+	if writer_closed or not session_active:
 		return
 	flush()
 	utc_end_time = Time.get_datetime_string_from_system(true)
@@ -257,6 +279,8 @@ func close() -> void:
 		writer_mutex.unlock()
 		writer_semaphore.post()
 		writer_thread.wait_to_finish()
+		writer_thread = null
+	session_active = false
 	writer_closed = true
 	enabled = false
 	_report_writer_error()

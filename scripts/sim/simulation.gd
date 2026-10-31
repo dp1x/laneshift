@@ -233,7 +233,7 @@ func finish_episode(reason: String) -> void:
 	status = "finished"
 	_finalize_episode(reason)
 
-func apply_action(action: String, duration: float = 0.5, source: String = "human") -> bool:
+func apply_action(action: String, duration: float = 0.5, source: String = "human", count_action: bool = true) -> bool:
 	if action not in get_legal_actions():
 		return false
 	var accepted := false
@@ -257,7 +257,7 @@ func apply_action(action: String, duration: float = 0.5, source: String = "human
 			brake_timer = max(0.1, duration)
 			accepted = true
 	if accepted:
-		if current_action != action:
+		if count_action:
 			action_counts[action] = int(action_counts.get(action, 0)) + 1
 		current_action = action
 		action_timer = max(0.1, duration)

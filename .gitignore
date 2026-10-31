@@ -17,7 +17,6 @@ runs/
 .env.*
 comparison.csv
 *.metrics.json
-CHECKPOINT.md
 BLUEPRINT.md
 .portable-dev/
 recordings/

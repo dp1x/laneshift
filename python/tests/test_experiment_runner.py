@@ -61,6 +61,35 @@ class ExperimentSummaryTests(unittest.TestCase):
         self.assertEqual(spec["kind"], "baseline")
         self.assertIsNone(spec.get("label_source"))
 
+    def test_onnx_policy_requires_paths_and_carries_provenance(self):
+        with self.assertRaises(ValueError):
+            build_policy_spec("onnx_kev", {}, {})
+        spec = build_policy_spec("onnx_kev", {}, {
+            "model_path": "kev.onnx",
+            "tokenizer_path": "tokenizer.json",
+            "length": 256,
+            "threads": 8,
+            "model_id": "laneshift-ft:v1",
+            "label_source": "fine_tuned_model",
+        })
+        self.assertEqual(spec["kind"], "onnx")
+        self.assertEqual(spec["model_id"], "laneshift-ft:v1")
+        self.assertEqual(spec["label_source"], "fine_tuned_model")
+        self.assertEqual(spec["length"], 256)
+
+    def test_comparison_row_records_matched_conditions_and_hash(self):
+        row = summarize_policy(
+            "onnx_kev",
+            [{"scenario_seed": 1, "score": 10, "distance": 20, "survival_time": 1,
+              "collision_count": 0, "termination_reason": "timeout", "final_lane": 1}],
+            {"decisions": 2, "applied_actions": {"STAY": 2}, "model_id": "ft:v1",
+             "model_sha256": "abc123"},
+            run_config={"traffic_density": 0.7, "sim_speed_scale": 1.0},
+        )
+        self.assertEqual(row["traffic_density"], 0.7)
+        self.assertEqual(row["sim_speed_scale"], 1.0)
+        self.assertEqual(row["model_sha256"], "abc123")
+
     def test_report_refuses_to_publish_rows_for_unloaded_checkpoints(self):
         rows = [{"policy": "kev_original", "model_loaded": "no", "model_id": ""}]
         with self.assertRaises(RuntimeError):

@@ -52,15 +52,24 @@ jobs:
         shell: pwsh
         run: |
           & "$env:GODOT_EXE" --headless --path . --editor --quit
+          if ($LASTEXITCODE -ne 0) { throw "Godot project import failed" }
 
       - name: Run Godot tests
         shell: pwsh
         run: |
-          & "$env:GODOT_EXE" --headless --path . --script res://tests/simulation_test.gd
-          & "$env:GODOT_EXE" --headless --path . --script res://tests/game_flow_test.gd
-          & "$env:GODOT_EXE" --headless --path . --script res://tests/network_test.gd
-          & "$env:GODOT_EXE" --headless --path . --script res://tests/telemetry_test.gd
-          & "$env:GODOT_EXE" --headless --path . --script res://tests/options_test.gd
+          $ErrorActionPreference = "Stop"
+          $tests = @(
+            "res://tests/simulation_test.gd",
+            "res://tests/game_flow_test.gd",
+            "res://tests/network_test.gd",
+            "res://tests/telemetry_test.gd",
+            "res://tests/telemetry_flow_test.gd",
+            "res://tests/options_test.gd"
+          )
+          foreach ($test in $tests) {
+            & "$env:GODOT_EXE" --headless --path . --script $test
+            if ($LASTEXITCODE -ne 0) { throw "Godot test failed: $test" }
+          }
 
       - name: Export release
         shell: pwsh

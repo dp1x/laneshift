@@ -109,6 +109,8 @@ def load_policy(name, model_configs=None, http_client=None, onnx_config=None, de
             intra_threads=int(config.get("threads", 0)) or None,
             data_path=str(config.get("data_path", "") or "") or None,
             arena=bool(config.get("arena", False)),
+            model_id=str(config.get("model_id", "") or ""),
+            label_source=str(config.get("label_source", "original_model") or "original_model"),
         )
     config = (model_configs or {}).get(name)
     if config is None:
@@ -376,14 +378,15 @@ class ControllerServer:
         return ordered[index]
 
     def metrics(self):
-        model_id = getattr(self.policy, "actual_run", "")
+        model_id = getattr(self.policy, "actual_run", "") or getattr(self.policy, "model_id", "")
         model_alias = getattr(self.policy, "model_alias", "")
-        policy_kind = "model" if hasattr(self.policy, "actual_run") else "baseline"
+        policy_kind = "model" if model_id else "baseline"
         return {
             "policy": self.policy_name,
             "policy_kind": policy_kind,
             "model_id": model_id,
             "model_alias": model_alias,
+            "model_sha256": getattr(self.policy, "model_sha256", ""),
             "decisions": self.decisions,
             "actions": dict(self.actions),
             "applied_actions": dict(self.applied_actions),
@@ -439,6 +442,8 @@ async def run_server(args):
             "length": args.onnx_length,
             "threads": args.onnx_threads,
             "arena": args.onnx_arena,
+            "model_id": args.onnx_model_id,
+            "label_source": args.onnx_label_source,
         }
         decisions_config = {
             "url": args.decisions_url,
@@ -488,7 +493,7 @@ async def run_server(args):
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--policy", default="rule_based", help="dummy, rule_based, or a named model-registry entry")
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--duration", type=float, default=0.35)
     parser.add_argument("--decision-timeout", type=float, default=0.45)
     parser.add_argument("--max-state-age", type=float, default=0.4,
@@ -514,6 +519,11 @@ def parse_args(argv=None):
                         help="onnxruntime intra-op threads (0 = all cores)")
     parser.add_argument("--onnx-arena", action="store_true",
                         help="enable the ONNX Runtime CPU memory arena (faster, more RAM)")
+    parser.add_argument("--onnx-model-id", default=os.getenv("LANESHIFT_ONNX_MODEL_ID", ""),
+                        help="human-readable identity recorded for this ONNX checkpoint")
+    parser.add_argument("--onnx-label-source", choices=("original_model", "fine_tuned_model"),
+                        default=os.getenv("LANESHIFT_ONNX_LABEL_SOURCE", "original_model"),
+                        help="provenance label for decisions from this ONNX checkpoint")
     parser.add_argument("--decisions-url", default=os.getenv("DECISIONS_URL", "https://openrouter.ai/api/alpha/decisions"))
     parser.add_argument("--decisions-model", default=os.getenv("DECISIONS_MODEL", "respan/span-01-lite:free"))
     parser.add_argument("--decisions-key-env", default="DECISIONS_FREE_OPENROUTER_API_KEY")

@@ -63,12 +63,7 @@ class OpenRouterDecisionPolicy:
 
     @staticmethod
     def _nearest(state: dict[str, Any], limit: int = 3) -> dict[str, Any]:
-        compact = compact_kev_state(state)
-        vehicles = sorted(
-            compact["traffic"],
-            key=lambda vehicle: float(vehicle.get("relative_distance") or 0.0),
-        )[:limit]
-        compact["traffic"] = vehicles
+        compact = compact_kev_state(state, max_vehicles=limit)
         return compact
 
     async def choose_action(self, state: dict[str, Any]) -> PolicyDecision:

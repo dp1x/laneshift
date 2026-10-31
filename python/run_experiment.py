@@ -111,6 +111,9 @@ def main() -> int:
     parser.add_argument("--onnx-length", type=int, default=256)
     parser.add_argument("--onnx-threads", type=int, default=8)
     parser.add_argument("--onnx-arena", action="store_true")
+    parser.add_argument("--onnx-model-id", default="")
+    parser.add_argument("--onnx-label-source", choices=("original_model", "fine_tuned_model"), default="original_model")
+    parser.add_argument("--sim-speed-scale", type=float, default=1.0)
     parser.add_argument("--decision-timeout", type=float, default=10.0)
     parser.add_argument("--max-state-age", type=float, default=10.0)
     parser.add_argument("--controller-timeout", type=float, default=30.0)
@@ -141,6 +144,8 @@ def main() -> int:
                 "--onnx-tokenizer", args.onnx_tokenizer,
                 "--onnx-length", str(args.onnx_length),
                 "--onnx-threads", str(args.onnx_threads),
+                "--onnx-model-id", args.onnx_model_id,
+                "--onnx-label-source", args.onnx_label_source,
             ]
             if args.onnx_arena:
                 controller_cmd.append("--onnx-arena")
@@ -168,7 +173,7 @@ def main() -> int:
             "--external-timeout-ms=12000",
             "--max-stale-ticks=6000",
             f"--countdown={args.countdown}",
-            "--sim-speed-scale=0.5" if args.policy in ("onnx_kev", "kev") else "--sim-speed-scale=1.0",
+            f"--sim-speed-scale={args.sim_speed_scale}",
         ]
         print("game:", " ".join(game_cmd), flush=True)
         game, game_lines, _ = _start(game_cmd, ROOT)

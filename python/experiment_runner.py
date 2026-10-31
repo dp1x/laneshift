@@ -16,15 +16,35 @@ BASELINE_POLICIES = {"dummy", "rule_based"}
 MODEL_LABEL_SOURCES = {"original_model", "fine_tuned_model"}
 
 
-def build_policy_spec(name, model_registry):
+def build_policy_spec(name, model_registry, onnx_config=None):
     """Describe how one controller policy must be launched.
 
-    Baselines are self-describing. Model policies require an explicit registry
-    entry that names the checkpoint, so no run can claim an identity that was
-    never verified against a running service.
+    Baselines are self-describing. HTTP model policies require an explicit
+    registry entry that names the checkpoint. The local ONNX policy requires
+    explicit model and tokenizer paths and records a hash of the model file.
     """
     if name in BASELINE_POLICIES:
         return {"name": name, "kind": "baseline", "label_source": None}
+    if name == "onnx_kev":
+        config = onnx_config or {}
+        model_path = str(config.get("model_path", "") or "")
+        tokenizer_path = str(config.get("tokenizer_path", "") or "")
+        if not model_path or not tokenizer_path:
+            raise ValueError("onnx_kev requires --onnx-model and --onnx-tokenizer")
+        label_source = str(config.get("label_source", "original_model") or "original_model")
+        if label_source not in MODEL_LABEL_SOURCES:
+            raise ValueError("onnx_kev label_source must be original_model or fine_tuned_model")
+        return {
+            "name": name,
+            "kind": "onnx",
+            "label_source": label_source,
+            "model_path": model_path,
+            "tokenizer_path": tokenizer_path,
+            "length": int(config.get("length", 256)),
+            "threads": int(config.get("threads", 0)),
+            "model_id": str(config.get("model_id", "") or ""),
+            "timeout": float(config.get("timeout", 10.0)),
+        }
     config = (model_registry or {}).get(name)
     if not isinstance(config, dict):
         raise ValueError(
@@ -65,7 +85,7 @@ def assert_models_loaded(rows):
     return True
 
 
-def summarize_policy(policy, episodes, controller, split=None):
+def summarize_policy(policy, episodes, controller, split=None, run_config=None):
     count = len(episodes)
     mean = lambda key: sum(float(row.get(key, 0.0)) for row in episodes) / count if count else 0.0
     collisions = sum(
@@ -95,8 +115,11 @@ def summarize_policy(policy, episodes, controller, split=None):
     return {
         "policy": policy,
         "split": split or "unsplit",
+        "traffic_density": float((run_config or {}).get("traffic_density", 0.0)),
+        "sim_speed_scale": float((run_config or {}).get("sim_speed_scale", 1.0)),
         "model_id": model_id,
         "model_alias": model_alias,
+        "model_sha256": str(controller.get("model_sha256", "") or ""),
         "model_loaded": model_loaded,
         "scenario_seeds": ";".join(str(row.get("scenario_seed", "")) for row in episodes),
         "episode_count": count,
@@ -159,12 +182,14 @@ def _parse_episode_summaries(output):
 
 
 def run_experiments(godot, project, policies, seeds, episodes_per_seed, duration, port, output_path,
-                    model_registry=None, seed_splits=None):
+                    model_registry=None, seed_splits=None, onnx_config=None,
+                    sim_speed_scale=1.0, traffic_density=0.7, controller_timeout=60.0):
     project = Path(project).resolve()
     output_path = Path(output_path).resolve()
     python_dir = project / "python"
     model_registry = model_registry or {}
-    specs = [build_policy_spec(name, model_registry) for name in policies]
+    specs = [build_policy_spec(name, model_registry, onnx_config) for name in policies]
+    run_config = {"traffic_density": traffic_density, "sim_speed_scale": sim_speed_scale}
     if seed_splits:
         phases = [(name, list(values)) for name, values in seed_splits.items() if values]
     else:
@@ -199,6 +224,17 @@ def run_experiments(godot, project, policies, seeds, episodes_per_seed, duration
                     "api_key_env": spec["api_key_env"],
                 }
             }, indent=2) + "\n", encoding="utf-8")
+        elif spec["kind"] == "onnx":
+            server_command += [
+                "--onnx-model", spec["model_path"],
+                "--onnx-tokenizer", spec["tokenizer_path"],
+                "--onnx-length", str(spec["length"]),
+                "--onnx-threads", str(spec["threads"]),
+                "--onnx-model-id", spec["model_id"],
+                "--onnx-label-source", spec["label_source"],
+                "--decision-timeout", str(max(spec["timeout"] + 0.05, 0.5)),
+                "--max-state-age", "10.0",
+            ]
         server = subprocess.Popen(
             server_command,
             cwd=python_dir,
@@ -207,7 +243,7 @@ def run_experiments(godot, project, policies, seeds, episodes_per_seed, duration
             text=True,
         )
         try:
-            _wait_for_server(server, port)
+            _wait_for_server(server, port, timeout=controller_timeout)
             for split_name, split_seeds in phases:
                 godot_command = [
                     godot,
@@ -219,6 +255,10 @@ def run_experiments(godot, project, policies, seeds, episodes_per_seed, duration
                     f"--episodes={episodes_per_seed}",
                     f"--episode-duration={duration}",
                     f"--ws-port={port}",
+                    f"--traffic-density={traffic_density}",
+                    f"--sim-speed-scale={sim_speed_scale}",
+                    "--external-timeout-ms=12000",
+                    "--max-stale-ticks=6000",
                 ]
                 timeout = max(60.0, len(split_seeds) * episodes_per_seed * duration * 2.5 + 30.0)
                 run = subprocess.run(
@@ -258,7 +298,7 @@ def run_experiments(godot, project, policies, seeds, episodes_per_seed, duration
                 raise RuntimeError(f"controller server recorded no decisions for {policy}:\n{server_output[-3000:]}")
             for split_name, split_seeds in phases:
                 split_episodes = [row for row in episode_rows if row["policy"] == policy and row["split"] == split_name]
-                rows.append(summarize_policy(policy, split_episodes, controller, split_name))
+                rows.append(summarize_policy(policy, split_episodes, controller, split_name, run_config))
         finally:
             if server.poll() is None:
                 server.terminate()
@@ -293,8 +333,17 @@ def parse_args(argv=None):
     parser.add_argument("--model-registry", type=Path, help="JSON registry of model policies with base_url, model, expected_run, label_source")
     parser.add_argument("--episodes-per-seed", type=int, default=1)
     parser.add_argument("--duration", type=float, default=30.0)
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--output", type=Path, default=Path("comparison.csv"))
+    parser.add_argument("--traffic-density", type=float, default=0.7)
+    parser.add_argument("--sim-speed-scale", type=float, default=1.0)
+    parser.add_argument("--controller-timeout", type=float, default=60.0)
+    parser.add_argument("--onnx-model", default="")
+    parser.add_argument("--onnx-tokenizer", default="")
+    parser.add_argument("--onnx-length", type=int, default=256)
+    parser.add_argument("--onnx-threads", type=int, default=0)
+    parser.add_argument("--onnx-model-id", default="")
+    parser.add_argument("--onnx-label-source", choices=("original_model", "fine_tuned_model"), default="original_model")
     return parser.parse_args(argv)
 
 
@@ -320,11 +369,23 @@ def main(argv=None):
             raise SystemExit(f"could not read model registry {args.model_registry}: {exc}")
         if isinstance(model_registry, dict) and isinstance(model_registry.get("models"), dict):
             model_registry = model_registry["models"]
+    onnx_config = {
+        "model_path": args.onnx_model,
+        "tokenizer_path": args.onnx_tokenizer,
+        "length": args.onnx_length,
+        "threads": args.onnx_threads,
+        "model_id": args.onnx_model_id,
+        "label_source": args.onnx_label_source,
+    }
     rows = run_experiments(
         args.godot, args.project, policies, seeds, args.episodes_per_seed,
         args.duration, args.port, args.output,
         model_registry=model_registry,
         seed_splits={"dev": dev_seeds, "test": test_seeds},
+        onnx_config=onnx_config,
+        sim_speed_scale=args.sim_speed_scale,
+        traffic_density=args.traffic_density,
+        controller_timeout=args.controller_timeout,
     )
     print(json.dumps(rows, indent=2))
     print(f"Comparison written to {args.output.resolve()}")

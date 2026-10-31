@@ -4,7 +4,9 @@ import unittest
 
 import httpx
 
+from kev_state import compact_kev_state
 from policies.model_adapter import KevIdentityError, KevInferenceError, KevResponseError, KevSystemOnePolicy
+from policies.onnx_kev import OnnxKevPolicy
 
 
 def sample_state():
@@ -36,6 +38,27 @@ def sample_state():
 
 
 class KevAdapterTests(unittest.IsolatedAsyncioTestCase):
+    def test_traffic_is_ordered_by_absolute_distance_and_capped(self):
+        state = sample_state()
+        state["traffic"] = [
+            {"id": "far", "lane": 0, "relative_distance_z": 40.0, "relative_speed_z": 1.0},
+            {"id": "behind", "lane": 2, "relative_distance_z": -3.0, "relative_speed_z": -5.0},
+            {"id": "near", "lane": 1, "relative_distance_z": 2.0, "relative_speed_z": 3.0},
+            {"id": "mid", "lane": 0, "relative_distance_z": 12.0, "relative_speed_z": 2.0},
+            {"id": "very-far", "lane": 2, "relative_distance_z": 80.0, "relative_speed_z": 0.0},
+        ]
+        compact = compact_kev_state(state, max_vehicles=3)
+        self.assertEqual([row["id"] for row in compact["traffic"]], ["near", "behind", "mid"])
+
+    def test_onnx_policy_accepts_explicit_provenance(self):
+        policy = OnnxKevPolicy(
+            "model.onnx",
+            "tokenizer.json",
+            model_id="laneshift-ft:v1",
+            label_source="fine_tuned_model",
+        )
+        self.assertEqual(policy.model_id, "laneshift-ft:v1")
+        self.assertEqual(policy.label_source, "fine_tuned_model")
     async def test_builds_typed_choice_request_and_parses_actual_response_shape(self):
         captured = []
 

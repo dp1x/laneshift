@@ -11,19 +11,32 @@ The project is intended to support experiments in fine-tuning compact decision m
 What works today:
 
 - A playable Godot driving simulator with human keyboard controls, a title screen, HUD, pause, game over and restart.
-- Simulation-state export and periodic telemetry at roughly 30 Hz of simulation time.
+- A coherent pseudo-perspective road, lane geometry, traffic sprites, crash feedback and corner HUD (the earlier full-width toolbar and lane markings through cars are gone).
+- Simulation-state export and periodic telemetry at roughly 30 Hz of simulation time. Recording works after a run has already started; the integration test covers that path.
 - Event-based action and episode logs.
 - A Python controller communicating with the game over a localhost WebSocket.
 - Dummy and rule-based policies, both usable as baselines.
+- Local ONNX Kev-0.8B inference on ARM64, about 1.4 s per decision at 256 tokens, with a model hash recorded in the provenance metadata.
+- A one-click `PLAY-KEV.bat` that starts the local Kev controller and the game together so you can watch the model drive.
 - Dataset conversion and experiment tooling, including a Kev-format training export.
-- A Kev System One adapter that has driven a real game episode with the released `jaredpalmer/kev-0.8b@v1.0` checkpoint running locally on CPU.
+- A matched-policy experiment runner. The committed pilot is small; it is a sanity check, not a finished study.
 
 What has **not** been established:
 
 - Fine-tuning has not been performed.
-- No claim has been made that any model improves gameplay over the rule-based baseline.
+- The model has not been shown to improve gameplay over the rule-based baseline. In the pilot it does not.
+- Calibration has not been measured on real held-out human play.
 
-The game itself is a rough 2D prototype. Its graphics are simple vector shapes, the driving model is kinematic rather than physical, and both are still being iterated on. Do not treat it as polished or production-ready.
+The original design conversation proposed a phone/ADB/MediaProjection capture pipeline and a computer-vision perception layer. That pipeline is not implemented. This repository is the simulation testbed: the engine supplies ground-truth state, so the remaining research question is decision quality and fine-tuning, not perception. The game itself is a focused 2D prototype, not a production game.
+
+## Screenshots
+
+![LANESHIFT menu](docs/screenshots/menu.png)
+
+![LANESHIFT with local Kev in control](docs/screenshots/ai-play.png)
+
+The AI panel shows the model alias, chosen action, probability and inference
+latency. The cyan ring marks the externally controlled bike.
 
 ## Running the game
 
@@ -45,7 +58,28 @@ Controls:
 | `T` | Switch between human and connected controller |
 | `Escape` | Pause or resume |
 
-Lane changes ease over about half a second and are applied once per press. Braking slows the bike, which changes how quickly traffic is caught. A collision ends the run.
+Lane changes ease over about a third of a second and are applied once per press. Braking slows the bike, which changes how quickly traffic is caught. A collision ends the run.
+
+The game opens fullscreen. `F11` toggles fullscreen/windowed. `--windowed` starts maximized instead.
+
+## Watch local Kev play
+
+The local path uses the exported ONNX graph, so no Kev server, PyTorch download, or cloud API is involved.
+
+```powershell
+PLAY-KEV.bat
+```
+
+The launcher finds the default model at `C:\Users\Dhane\dev\kev-onnx-backup\kev07b_fp16_L256.onnx` and the Qwen tokenizer in the Hugging Face cache. Override either with `-Model` and `-Tokenizer`, or with `LANESHIFT_ONNX_MODEL` and `LANESHIFT_ONNX_TOKENIZER`.
+
+```powershell
+PLAY-KEV.bat -Windowed
+PLAY-KEV.bat -Episodes 10 -EpisodeDuration 20
+```
+
+The controller starts on port `8766`, waits for the model to load, then launches the game in auto-run with Kev in control. The bottom-right panel shows the model alias, the chosen action, the probability and the inference latency. The player has a cyan ring while the external controller has control. Close the game window to stop both processes.
+
+The controller log is written to `logs\kev-controller.log`.
 
 ## Recording human gameplay
 
@@ -71,11 +105,13 @@ python python/server.py --policy dummy
 python python/server.py --policy rule_based
 ```
 
-The controller binds to `127.0.0.1:8765` only. Godot connects to it, streams state snapshots, and applies the actions that come back. If the controller is not running, the game stays fully playable with the keyboard. If the controller disconnects or stops sending actions, the game reverts to keyboard control after 1.5 seconds.
+The controller binds to `127.0.0.1:8766` only. Godot connects to it, streams state snapshots, and applies the actions that come back. If the controller is not running, the game stays fully playable with the keyboard. If the controller disconnects or stops sending actions, the game reverts to keyboard control after 1.5 seconds.
 
 ## Running a Kev model
 
-The controller speaks to a Kev System One server over HTTP; Godot never sees Kev. The server is a separate process, so the two ports stay independent: WebSocket `8765` for game control, HTTP `8009` for inference.
+For the quick local path, use `PLAY-KEV.bat` above. This section describes the full Kev System One HTTP server path.
+
+The controller speaks to a Kev System One server over HTTP; Godot never sees Kev. The server is a separate process, so the two ports stay independent: WebSocket `8766` for game control, HTTP `8009` for inference.
 
 Start Kev itself, following the upstream project:
 
@@ -91,7 +127,7 @@ On Windows, Hugging Face needs `HF_HUB_DISABLE_SYMLINKS=1` because creating syml
 Then register the checkpoint and start the controller:
 
 ```powershell
-python python/server.py --policy kev_original --kev-config kev_models.example.json --port 8765
+python python/server.py --policy kev_original --kev-config kev_models.example.json --port 8766
 ```
 
 `expected_run` must match the `run` value that `GET /v1/models` reports for the checkpoint that is actually loaded. The controller refuses to label a run as a model if it does not, so a swapped or missing checkpoint fails at startup instead of producing fake model data. `kev_models.example.json` is a template; copy it and adjust the values for your own setup. Never commit API keys; the controller reads `KEV_API_KEY` from the environment.
@@ -100,8 +136,10 @@ python python/server.py --policy kev_original --kev-config kev_models.example.js
 
 | State | Status |
 | --- | --- |
-| Local CPU inference with the real checkpoint | **Verified.** `jaredpalmer/kev-0.8b@v1.0` served locally on CPU and driving a real game episode. |
-| Local CPU inference for a *fine-tuned* checkpoint | **Not done.** No fine-tuned checkpoint exists yet. |
+| Local ONNX inference with the released checkpoint | **Verified.** `jaredpalmer/kev-0.8b@v1.0` exported to ONNX, about 1.4 s per 256-token decision on this ARM64 CPU. |
+| Local HTTP inference with the released checkpoint | **Verified.** Full torch server, about 15 s per decision on this CPU. |
+| Local inference for a *fine-tuned* checkpoint | **Not done.** No fine-tuned checkpoint exists yet. The ONNX label and model id are configurable, so a fine-tuned graph can be labelled correctly. |
+| Matched rule-based vs. ONNX comparison | **Pilot only.** Same seeds, duration, traffic density and simulation speed. Small sample; see the experiment section. |
 | Mock adapter test only | The mock service in `python/tools/` is used by the test suite. It runs no model. |
 | Fine-tuning | **Not performed.** No claim of improved gameplay has been made. |
 
@@ -252,52 +290,85 @@ godot --headless --path . --script res://tests/simulation_test.gd
 godot --headless --path . --script res://tests/game_flow_test.gd
 godot --headless --path . --script res://tests/network_test.gd
 godot --headless --path . --script res://tests/telemetry_test.gd
+godot --headless --path . --script res://tests/telemetry_flow_test.gd
 godot --headless --path . --script res://tests/options_test.gd
 ```
 
-The Godot checks cover seeded reproducibility, physical versus target lane, legal-action generation, terminal snapshot uniqueness, synthetic keyboard input, the title/pause/crash/restart/menu flow, command validation, and telemetry persistence including write-failure recovery. The Python checks cover policy provenance, action legality, the Kev request and response contract against a mock HTTP endpoint, decision timeouts, dataset joins and leakage, the Kev training export, seed-grouped splits, and comparison metrics.
+The Godot checks cover seeded reproducibility, physical versus target lane, legal-action generation, terminal snapshot uniqueness, synthetic keyboard input, the title/pause/crash/restart/menu flow, command validation, telemetry persistence including write-failure recovery, and the real `play -> Record -> stop` path. The Python checks cover policy provenance, action legality, the Kev request and response contract against a mock HTTP endpoint, decision timeouts, dataset joins and leakage, the Kev training export, seed-grouped splits, nearest-traffic ordering, and comparison metrics.
 
-The Python dependencies are in `python/requirements.txt` (`websockets`, `httpx`):
+The Python dependencies are in `python/requirements.txt` (`websockets`, `httpx`, `numpy`, `onnxruntime`, `tokenizers`):
 
 ```powershell
 python -m pip install -r python/requirements.txt
 ```
 
+## Experiments
+
+`python/experiment_runner.py` runs every policy with the same seeds, duration, traffic density, simulation speed, decision timeout and staleness bounds. For the local ONNX model:
+
+```powershell
+python python/experiment_runner.py `
+  --policies rule_based,onnx_kev `
+  --seeds 1,2,3,4,5 --duration 20 `
+  --traffic-density 0.7 --sim-speed-scale 1.0 `
+  --onnx-model C:\Users\Dhane\dev\kev-onnx-backup\kev07b_fp16_L256.onnx `
+  --onnx-tokenizer "$env:USERPROFILE\.cache\huggingface\hub\models--Qwen--Qwen3.5-0.8B-Base\snapshots\dc7cdfe2ee4154fa7e30f5b51ca41bfa40174e68\tokenizer.json" `
+  --onnx-length 256 --onnx-threads 8 `
+  --onnx-model-id "jaredpalmer/kev-0.8b@v1.0+onnx:L256" `
+  --output comparison.csv
+```
+
+The CSV records the model id, model hash, traffic density, simulation speed, score, survival, collision frequency, action distribution, decision count and latency. The pilot is summarized in `docs/RESULTS.md`.
+
+Pilot headline (5 seeds x 20 s, density 0.7, sim speed 1.0):
+
+| Policy | Mean score | Crashes | Decisions | Model latency |
+| --- | ---: | ---: | ---: | ---: |
+| `rule_based` | 284.77 | 0 / 5 | 855 (843 STAY) | 0.5 ms |
+| `onnx_kev` | 199.61 | 3 / 5 | 30 (all STAY) | 2.1 s mean, 4.1 s p95 |
+
+The released checkpoint is slower than the decision cadence and does not avoid traffic. This is a baseline result, not a fine-tuning result.
+
 ## Current limitations
 
-- Real Kev-0.8B CPU inference works on this machine, but it is slow enough (about 15 s per decision) that it cannot steer at the game's normal decision rate.
-- Fine-tuning has not been performed, and the model's effect on gameplay has not been measured.
-- The game is a simple 2D experimental environment, not a realistic traffic simulator. Vehicles move along fixed lanes at constant speeds, and there is no acceleration model for traffic.
-- The top-down renderer uses vector shapes and a fixed X/Z split: the road stays readable while the view still shows oncoming traffic. It is intentionally minimal.
+- Local ONNX Kev-0.8B runs at roughly 1.4 s per 256-token decision on this CPU. The game's decision cadence is 10 Hz, so most states are superseded and the model acts on a delayed snapshot. The HTTP torch path is about 15 s per decision.
+- Fine-tuning has not been performed. The matched pilot compares the released checkpoint with the rule-based baseline; it is small and the model does not win.
+- The game is a simple 2D experimental environment, not a realistic traffic simulator. Vehicles move along fixed lanes at constant speeds, and there is no acceleration or lane-change model for traffic.
+- The renderer uses a pseudo-perspective projection and vector shapes. It is intentionally minimal, and the road still uses a fixed three-lane layout.
 - Steering is discrete: the motorcycle changes lanes on rails rather than being steered continuously.
 
 ## Roadmap
 
-1. Collect and validate useful training data.
-2. Fine-tune the decision model.
-3. Compare the original and fine-tuned models on held-out scenarios.
-4. Measure gameplay performance and local inference latency.
-5. Make CPU inference fast enough to steer in real time, or move it off this machine.
+1. Collect and validate useful training data, starting with the recording path that now has an integration test.
+2. Train a small supervised baseline on approved decisions.
+3. Fine-tune Kev and compare it with the original and rule-based policies on held-out seeds.
+4. Measure calibration (Brier score, log loss, ECE) and action distributions, not only score.
+5. Run a larger matched study; the current pilot is a sanity check.
+6. Make local inference faster, or accept the delayed-decision regime and measure it explicitly.
 
 ## Repository layout
 
 ```text
 project.godot            Godot project settings
 kev_models.example.json  Template registry of model policies
+PLAY-KEV.bat             One-click local ONNX Kev run
+scripts/play_kev.ps1     Starts the ONNX controller and the game together
 scenes/main.tscn         Main scene; the world is built procedurally at runtime
-scripts/main.gd          Top-down 2D rendering, HUD, input, episode flow, recording
+scripts/main.gd          Pseudo-perspective rendering, HUD, input, episode flow, recording
 scripts/sim/simulation.gd Authoritative simulation: state, actions, seeded traffic, collisions
 scripts/net/net_bridge.gd WebSocket client and command validation
 scripts/telemetry/telemetry_logger.gd  Buffered JSONL writer
 python/server.py         Controller server and policy selection
 python/policy.py         Policy interface and decision record
 python/kev_state.py      The one state projection shared by inference and training
-python/policies/         dummy, rule_based, and the Kev System One adapter
+python/policies/         dummy, rule_based, ONNX Kev and the HTTP Kev adapter
 python/dataset_prep.py   Log validation, candidate building, Kev training export
-python/experiment_runner.py  Seeded policy comparison across scenarios
+python/experiment_runner.py  Matched policy comparison across scenarios
 python/tools/            Mock Kev service used by the tests (not a model)
 python/tests/            Python test suite
 tests/                   Godot headless test scripts
+docs/INTENT.md           Original thesis and current scope
+docs/RESULTS.md          Current pilot results and their limits
 ```
 
 ## Development and licence

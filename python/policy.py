@@ -11,6 +11,7 @@ class PolicyDecision:
     policy_name: str
     model_id: str | None = None
     model_alias: str | None = None
+    model_sha256: str | None = None
     probabilities: dict[str, float] | None = None
     confidence: float | None = None
     model_latency_ms: float | None = None

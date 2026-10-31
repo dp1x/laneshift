@@ -2,7 +2,7 @@ import unittest
 import asyncio
 import json
 
-from server import ALLOWED_ACTIONS, ControllerServer, load_policy, make_action_message, validate_state_message
+from server import ALLOWED_ACTIONS, ControllerServer, load_policy, make_action_message, parse_args, validate_state_message
 
 
 def sample_state():
@@ -42,6 +42,9 @@ class SlowPolicy:
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_controller_default_port_matches_game_default(self):
+        self.assertEqual(parse_args([]).port, 8766)
+
     def test_accepts_well_formed_state_and_rejects_missing_identity(self):
         self.assertTrue(validate_state_message(sample_state()))
         invalid = sample_state()
