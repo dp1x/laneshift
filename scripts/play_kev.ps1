@@ -15,18 +15,33 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$root = Split-Path -Parent $PSScriptRoot
-$pythonDir = Join-Path $root "python"
+$packaged = Test-Path (Join-Path $PSScriptRoot "LANESHIFT.exe")
+if ($packaged) {
+    $root = $PSScriptRoot
+} else {
+    $root = Split-Path -Parent $PSScriptRoot
+}
 $logDir = Join-Path $root "logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
-if (-not $Model) {
-    $Model = "C:\Users\Dhane\dev\kev-onnx-backup\kev07b_fp16_L256.onnx"
-}
-if (-not $Tokenizer) {
-    $cache = Join-Path $env:USERPROFILE ".cache\huggingface\hub\models--Qwen--Qwen3.5-0.8B-Base\snapshots"
-    $found = Get-ChildItem $cache -Recurse -Filter "tokenizer.json" -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($found) { $Tokenizer = $found.FullName }
+if ($packaged) {
+    $pythonExe = Join-Path $root "runtime\py\python.exe"
+    $pythonDir = Join-Path $root "controller"
+    $gameExe = Join-Path $root "LANESHIFT.exe"
+    if (-not $Model) { $Model = Join-Path $root "runtime\kev07b_fp16_L256.onnx" }
+    if (-not $Tokenizer) { $Tokenizer = Join-Path $root "runtime\tokenizer.json" }
+} else {
+    $pythonExe = "python"
+    $pythonDir = Join-Path $root "python"
+    $gameExe = ""
+    if (-not $Model) {
+        $Model = "C:\Users\Dhane\dev\kev-onnx-backup\kev07b_fp16_L256.onnx"
+    }
+    if (-not $Tokenizer) {
+        $cache = Join-Path $env:USERPROFILE ".cache\huggingface\hub\models--Qwen--Qwen3.5-0.8B-Base\snapshots"
+        $found = Get-ChildItem $cache -Recurse -Filter "tokenizer.json" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) { $Tokenizer = $found.FullName }
+    }
 }
 if (-not (Test-Path $Model)) {
     throw "ONNX model not found: $Model. Set LANESHIFT_ONNX_MODEL or pass -Model."
@@ -35,7 +50,7 @@ if (-not (Test-Path $Tokenizer)) {
     throw "Tokenizer not found: $Tokenizer. Set LANESHIFT_ONNX_TOKENIZER or pass -Tokenizer."
 }
 if (-not $ModelId) {
-    $ModelId = "jaredpalmer/kev-0.8b@v1.0+onnx-fp16:L$Length"
+    $ModelId = "jaredpalmer/kev-0.8b@v1.0+onnx:L$Length"
 }
 
 $controllerLog = Join-Path $logDir "kev-controller.log"
@@ -57,7 +72,7 @@ $controllerArgs = @(
 )
 
 Write-Host "Starting local Kev ONNX controller on port $Port..."
-$controller = Start-Process -FilePath "python" -ArgumentList $controllerArgs -WorkingDirectory $pythonDir -PassThru -WindowStyle Hidden -RedirectStandardOutput $controllerLog -RedirectStandardError $controllerErr
+$controller = Start-Process -FilePath $pythonExe -ArgumentList $controllerArgs -WorkingDirectory $pythonDir -PassThru -WindowStyle Hidden -RedirectStandardOutput $controllerLog -RedirectStandardError $controllerErr
 
 try {
     $deadline = (Get-Date).AddSeconds(90)
@@ -85,11 +100,7 @@ try {
     Write-Host "Model: $ModelId"
     Write-Host "Logs:  $controllerLog"
 
-    $godotArgs = @()
-    if ($Headless) { $godotArgs += "--headless" }
-    $godotArgs += @(
-        "--path", $root,
-        "--",
+    $gameArgs = @(
         "--auto-run",
         "--seeds=1",
         "--episodes=$Episodes",
@@ -100,9 +111,20 @@ try {
         "--external-timeout-ms=12000",
         "--max-stale-ticks=6000"
     )
-    if ($Windowed) { $godotArgs += "--windowed" }
+    if ($Windowed) { $gameArgs += "--windowed" }
 
-    & $Godot @godotArgs
+    if ($packaged) {
+        $exeArgs = @()
+        if ($Headless) { $exeArgs += "--headless" }
+        $exeArgs += "--"
+        $exeArgs += $gameArgs
+        & $gameExe @exeArgs
+    } else {
+        $godotArgs = @()
+        if ($Headless) { $godotArgs += "--headless" }
+        $godotArgs += @("--path", $root, "--") + $gameArgs
+        & $Godot @godotArgs
+    }
     exit $LASTEXITCODE
 } finally {
     if ($controller -and -not $controller.HasExited) {
