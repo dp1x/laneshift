@@ -42,7 +42,7 @@ func _test_option_values_survive_parsing() -> void:
 
 func _test_defaults_are_sane() -> void:
 	var options: Dictionary = MainScript.parse_options(PackedStringArray(["--auto-run"]))
-	_check(int(options["ws_port"]) == 8765, "default websocket port should be 8765")
+	_check(int(options["ws_port"]) == 8766, "default websocket port should be 8766")
 	_check(int(options["external_timeout_ms"]) == 1500, "default control timeout should be 1500 ms")
 	_check(int(options["max_stale_ticks"]) == 30, "default staleness bound should be 30 ticks")
 	_check(is_equal_approx(float(options["traffic_density"]), -1.0), "traffic density should be unset by default")
