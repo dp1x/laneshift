@@ -100,6 +100,8 @@ func log_episode(summary: Dictionary) -> void:
 	flush()
 
 func tick(delta: float) -> void:
+	if not enabled or writer_closed:
+		return
 	flush_timer += delta
 	if flush_timer >= flush_interval:
 		flush_timer = 0.0
@@ -107,6 +109,11 @@ func tick(delta: float) -> void:
 		_report_writer_error()
 
 func flush() -> void:
+	if writer_closed:
+		telemetry_buffer.clear()
+		events_buffer.clear()
+		episodes_buffer.clear()
+		return
 	if not telemetry_buffer.is_empty():
 		_queue_records("telemetry.jsonl", telemetry_buffer)
 		telemetry_buffer = []
@@ -118,7 +125,9 @@ func flush() -> void:
 		episodes_buffer = []
 
 func _queue_records(filename: String, records: Array) -> bool:
-	if writer_closed or writer_thread == null or not writer_thread.is_started():
+	if writer_closed:
+		return false
+	if writer_thread == null or not writer_thread.is_started():
 		_mark_queue_failure("telemetry writer is not available", records.size())
 		return false
 	writer_mutex.lock()
@@ -249,6 +258,7 @@ func close() -> void:
 		writer_semaphore.post()
 		writer_thread.wait_to_finish()
 	writer_closed = true
+	enabled = false
 	_report_writer_error()
 	if unrecovered_batches > 0:
 		push_error("LaneShift telemetry ended with %d unrecovered batches (%d dropped records)" % [unrecovered_batches, dropped_records])
