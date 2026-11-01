@@ -12,6 +12,7 @@ from export_decisions import (
     assign_splits,
     build_rows,
     feature_vector,
+    file_sha256,
     lane_gap,
     main,
     nearest_vehicles,
@@ -188,6 +189,13 @@ class DecisionExportTests(unittest.TestCase):
         ordered = nearest_vehicles(traffic)
         self.assertEqual([item[2]["id"] for item in ordered], ["behind", "near", "mid"])
 
+    def test_nearest_vehicles_tie_break_matches_rounded_distance_ordering(self):
+        # Raw distances put "b" first; both round to 5.0, so the stable sort must
+        # keep the snapshot order, exactly like kev_state.compact_kev_state.
+        traffic = [vehicle("a", 0, 5.004, 1.0), vehicle("b", 1, 5.003, 1.0), vehicle("c", 2, 9.0, 1.0)]
+        ordered = nearest_vehicles(traffic)
+        self.assertEqual([item[2]["id"] for item in ordered], ["a", "b", "c"])
+
     def test_lane_gap_ignores_vehicles_behind_and_missing_lanes(self):
         traffic = [vehicle("ahead", 1, 25.0, 5.0), vehicle("behind", 1, -10.0, 5.0),
                    vehicle("other", 2, 5.0, 5.0)]
@@ -256,6 +264,28 @@ class DecisionExportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             assign_splits(rows, 0.2, 0.2, 7)
 
+    def test_split_rejects_an_episode_shared_by_validation_and_test(self):
+        rows = [
+            {"episode_id": f"session:ep_{seed}", "scenario_seed": seed, "action": "STAY", "split": None}
+            for seed in range(1, 11)
+        ]
+        summary = assign_splits([dict(row) for row in rows], 0.2, 0.2, 7)
+        validation_seed = summary["validation"]["scenario_seeds"][0]
+        test_seed = summary["test"]["scenario_seeds"][0]
+        leaky = [dict(row) for row in rows]
+        # The same episode id under a validation seed and a test seed must be refused.
+        leaky.append({
+            "episode_id": f"session:ep_{validation_seed}",
+            "scenario_seed": test_seed,
+            "action": "STAY",
+            "split": None,
+        })
+        with self.assertRaises(SystemExit) as caught:
+            assign_splits(leaky, 0.2, 0.2, 7)
+        self.assertIn("episode", str(caught.exception))
+        self.assertIn("validation", str(caught.exception))
+        self.assertIn("test", str(caught.exception))
+
     def test_csv_and_jsonl_share_one_schema(self):
         state = snapshot("ep_a", 5, 10)
         rows, _report = build_rows([write_session(
@@ -292,6 +322,9 @@ class DecisionExportTests(unittest.TestCase):
         self.assertEqual(card["counts"]["episodes"], 5)
         self.assertEqual(sum(card["action_counts"].values()), 5)
         self.assertEqual(card["label_source_counts"], {"rule_based": 5})
+        self.assertEqual(card["conditions"]["policy"], "rule_based")
+        self.assertEqual(card["decisions_sha256"], file_sha256(output))
+        self.assertIn("commit", card["code_commit"])
         self.assertIn("rule_based", " ".join(card["limits"]))
         self.assertEqual(sum(split["rows"] for split in card["splits"].values()), 5)
         split_seeds = [set(split["scenario_seeds"]) for split in card["splits"].values()]

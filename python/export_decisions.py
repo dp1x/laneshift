@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
+import itertools
 import json
+import subprocess
 import sys
 from collections import Counter
 from datetime import datetime, timezone
@@ -140,13 +143,19 @@ def time_to_collision(distance, closing_speed):
 
 
 def nearest_vehicles(traffic, limit=MAX_VEHICLES):
-    """Order traffic the way the Kev projection does: nearest by absolute distance."""
+    """Order traffic the way kev_state.compact_kev_state does: nearest by rounded absolute distance.
+
+    Python's sort is stable, so vehicles whose rounded distances tie keep their
+    snapshot order, matching the Kev projection's tie behaviour.
+    """
     ordered = []
     for vehicle in traffic:
         if not isinstance(vehicle, dict):
             continue
         distance = _number(vehicle.get("relative_distance_z"))
-        ordered.append((abs(distance) if distance is not None else 1_000_000.0, distance, vehicle))
+        rounded = _round(distance, 2)
+        sort_key = abs(rounded) if rounded is not None else 1_000_000.0
+        ordered.append((sort_key, distance, vehicle))
     ordered.sort(key=lambda item: item[0])
     return ordered[:limit]
 
@@ -367,8 +376,26 @@ def build_rows(sessions):
     return rows, report
 
 
+def _assert_split_disjoint(rows_by_split, key, label):
+    """Every pair of splits must share no value of `key` (seed or episode id)."""
+    values = {
+        name: {row.get(key) for row in split_rows if row.get(key) is not None}
+        for name, split_rows in rows_by_split.items()
+    }
+    for left, right in itertools.combinations(sorted(rows_by_split), 2):
+        overlap = values[left] & values[right]
+        if overlap:
+            sample = ", ".join(str(value) for value in sorted(map(str, overlap))[:5])
+            raise SystemExit(f"{label} appear in both {left} and {right}: {sample}")
+
+
 def assign_splits(rows, validation_fraction, test_fraction, split_seed):
-    """Attach a split label from dataset_prep's seed-grouped three-way split."""
+    """Attach a split label from dataset_prep's seed-grouped three-way split.
+
+    Refuses to continue unless every pair of splits is disjoint in both
+    scenario seeds and episode ids, so one episode can never be trained on and
+    scored at the same time.
+    """
     splits = split_by_scenario(
         rows,
         validation_fraction=validation_fraction,
@@ -389,21 +416,41 @@ def assign_splits(rows, validation_fraction, test_fraction, split_seed):
         }
         if not split_rows:
             raise SystemExit(f"split {name!r} is empty; use more scenario seeds")
-    train_seeds = set(summary["train"]["scenario_seeds"])
-    validation_seeds = set(summary["validation"]["scenario_seeds"])
-    test_seeds = set(summary["test"]["scenario_seeds"])
-    if train_seeds & validation_seeds or train_seeds & test_seeds or validation_seeds & test_seeds:
-        raise SystemExit("scenario seeds overlap between splits")
-    train_episodes = {row["episode_id"] for row in splits["train"]}
-    other_episodes = {row["episode_id"] for row in splits["validation"] + splits["test"]}
-    if train_episodes & other_episodes:
-        raise SystemExit("episodes overlap between splits")
+    _assert_split_disjoint(splits, "scenario_seed", "scenario seeds")
+    _assert_split_disjoint(splits, "episode_id", "episodes")
     return summary
+
+
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def code_commit(repo_root=None):
+    """Best-effort git identity, so artifacts can be tied to the code that made them."""
+    root = Path(repo_root) if repo_root else Path(__file__).resolve().parent.parent
+    try:
+        commit = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5
+        )
+        status = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain"], capture_output=True, text=True, timeout=5
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {"commit": None, "dirty": None}
+    if commit.returncode != 0 or not commit.stdout.strip():
+        return {"commit": None, "dirty": None}
+    dirty = bool(status.stdout.strip()) if status.returncode == 0 else None
+    return {"commit": commit.stdout.strip(), "dirty": dirty}
 
 
 def build_data_card(rows, report, split_summary, args):
     """The data card: what this dataset is, how it was split, and what it cannot show."""
     episode_ids = {row["episode_id"] for row in rows}
+    label_sources = dict(Counter(str(row["label_source"]) for row in rows))
     episodes = {}
     for row in rows:
         episodes.setdefault(row["episode_id"], row)
@@ -416,8 +463,10 @@ def build_data_card(rows, report, split_summary, args):
         "schema_version": SCHEMA_VERSION,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "source": "LaneShift simulation recordings joined by python/export_decisions.py",
+        "code_commit": code_commit(),
         "conditions": {
-            "policy": "rule_based",
+            "policy": next(iter(label_sources)) if len(label_sources) == 1 else "mixed",
+            "label_sources": sorted(label_sources),
             "decision_cadence_hz": 10,
             "telemetry_cadence_hz": 30,
             "episode_duration_s": args.duration,
@@ -438,7 +487,7 @@ def build_data_card(rows, report, split_summary, args):
             "episodes_with_collision": sum(1 for row in episodes.values() if (row["episode_collisions"] or 0) > 0),
         },
         "action_counts": dict(Counter(row["action"] for row in rows)),
-        "label_source_counts": dict(Counter(str(row["label_source"]) for row in rows)),
+        "label_source_counts": label_sources,
         "probabilities_present": sum(1 for row in rows if row["prob_LEFT"] is not None),
         "rejected_decisions": report["rejected_actions"],
         "incomplete_decisions": report["incomplete_actions"],
@@ -516,7 +565,6 @@ def main(argv=None):
     if not rows:
         raise SystemExit("no accepted controller decisions found; check the recordings")
     split_summary = assign_splits(rows, args.validation_fraction, args.test_fraction, args.split_seed)
-    card = build_data_card(rows, report, split_summary, args)
 
     base = args.output.with_suffix("")
     jsonl_path = base.with_name(base.name + ".jsonl")
@@ -524,6 +572,11 @@ def main(argv=None):
     card_path = base.with_name(base.name + ".card.json")
     write_jsonl(jsonl_path, rows)
     write_csv(csv_path, rows)
+    card = build_data_card(rows, report, split_summary, args)
+    # The dataset itself lives outside git; the hash lets a fresh checkout verify
+    # any copy of it against this card.
+    card["decisions_file"] = str(jsonl_path)
+    card["decisions_sha256"] = file_sha256(jsonl_path)
     card_path.parent.mkdir(parents=True, exist_ok=True)
     card_path.write_text(json.dumps(card, indent=2) + "\n", encoding="utf-8")
 
@@ -531,6 +584,7 @@ def main(argv=None):
         "rows": len(rows),
         "episodes": card["counts"]["episodes"],
         "action_counts": card["action_counts"],
+        "decisions_sha256": card["decisions_sha256"],
         "splits": {name: {"rows": value["rows"], "episodes": value["episodes"], "scenario_seeds": value["scenario_seeds"]}
                    for name, value in split_summary.items()},
         "outputs": {"jsonl": str(jsonl_path), "csv": str(csv_path), "data_card": str(card_path)},

@@ -1,9 +1,38 @@
 {
   "schema_version": 1,
-  "created_at_utc": "2026-11-01T10:53:17.131647+00:00",
+  "created_at_utc": "2026-11-01T11:09:46.800910+00:00",
+  "environment": {
+    "python": "3.11.15",
+    "python_implementation": "CPython",
+    "numpy": "2.4.6",
+    "platform": "Windows-10-10.0.26100-SP0",
+    "machine": "AMD64",
+    "processor": "ARMv8 (64-bit) Family 8 Model 1 Revision 101, Qualcomm Technologies Inc",
+    "cpu_count": 8,
+    "blas": {
+      "name": "scipy-openblas",
+      "version": "0.3.31.188.0",
+      "configuration": "OpenBLAS 0.3.31.188.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY SkylakeX MAX_THREADS=24"
+    },
+    "thread_env": {
+      "OMP_NUM_THREADS": null,
+      "OPENBLAS_NUM_THREADS": null,
+      "MKL_NUM_THREADS": null
+    }
+  },
+  "code": {
+    "commit": "630a9f93544ea03f1e91003ef6bf579294c8bfc0",
+    "dirty": true
+  },
+  "determinism_note": "Weights and metrics reproduce exactly only on the same Python, NumPy and BLAS build with the same thread settings; other builds can change floating-point summation order.",
   "dataset": {
     "rows": 1348,
     "episodes": 15,
+    "path": ".portable-dev\\pilot\\decisions.jsonl",
+    "decisions_sha256": "a4ff7096590b1e59ac635f086b546bf733eb9689d581517f51acce79d6903ce1",
+    "label_sources": [
+      "rule_based"
+    ],
     "episode_outcomes": {
       "crash": 8,
       "timeout": 7
@@ -117,6 +146,7 @@
     "learning_rate": 0.02,
     "batch_size": 32,
     "class_weights": "none",
+    "class_weight_values": null,
     "seed": 1234,
     "best_epoch": 72,
     "epochs_run": 102,

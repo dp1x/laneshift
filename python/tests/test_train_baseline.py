@@ -1,6 +1,9 @@
 import argparse
 import copy
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 import numpy as np
 
@@ -9,6 +12,7 @@ from train_baseline import (
     ACTIONS,
     accuracy,
     brier_score,
+    class_weight_values,
     class_weights,
     confusion_matrix,
     constant_probabilities,
@@ -16,10 +20,12 @@ from train_baseline import (
     expected_calibration_error,
     log_loss,
     macro_f1,
+    main,
     one_hot,
     predict_proba_from_model,
     rows_to_arrays,
     train,
+    validate_split_isolation,
 )
 
 
@@ -229,6 +235,84 @@ class TrainingTests(unittest.TestCase):
         encoded = one_hot(np.array([ACTIONS.index("BRAKE")]))
         self.assertEqual(encoded.shape, (1, len(ACTIONS)))
         self.assertEqual(int(encoded.argmax()), ACTIONS.index("BRAKE"))
+
+    def test_scaler_statistics_come_from_the_train_split_only(self):
+        rows = [make_row(split="train", seed=1, same_lane_gap=100.0 + 10.0 * step, episode="s:ep_1")
+                for step in range(6)]
+        rows += [make_row(split="validation", seed=2, same_lane_gap=5.0 + step, episode="s:ep_2")
+                 for step in range(6)]
+        rows += [make_row(split="test", seed=3, same_lane_gap=5.0 + step, episode="s:ep_3")
+                 for step in range(6)]
+
+        model, _metrics = train(rows, parse_args(hidden="8", l2="0.001", epochs=20, patience=5))
+
+        index = FEATURE_NAMES.index("nearest_same_lane_gap")
+        train_mean = float(np.mean([feature_vector(row)[index] for row in rows if row["split"] == "train"]))
+        all_mean = float(np.mean([feature_vector(row)[index] for row in rows]))
+        self.assertAlmostEqual(model["scaler"]["mean"][index], train_mean, places=9)
+        self.assertNotAlmostEqual(model["scaler"]["mean"][index], all_mean, places=3)
+
+    def test_balanced_class_weights_come_from_train_labels_only(self):
+        rows = [make_row(action="STAY", split="train", seed=1, episode="s:ep_1") for _ in range(10)]
+        rows += [make_row(action="BRAKE", split="train", seed=1, episode="s:ep_1") for _ in range(2)]
+        rows += [make_row(action="LEFT", split="validation", seed=2, episode="s:ep_2") for _ in range(4)]
+        rows += [make_row(action="STAY", split="validation", seed=2, episode="s:ep_2")]
+        rows += [make_row(action="LEFT", split="test", seed=3, episode="s:ep_3") for _ in range(4)]
+        rows += [make_row(action="STAY", split="test", seed=3, episode="s:ep_3")]
+
+        _model, metrics = train(rows, parse_args(class_weights="balanced", hidden="8", l2="0.001",
+                                                 epochs=10, patience=5))
+
+        values = metrics["config"]["class_weight_values"]
+        train_labels = [ACTIONS.index(row["action"]) for row in rows if row["split"] == "train"]
+        all_labels = [ACTIONS.index(row["action"]) for row in rows]
+        self.assertEqual(values, class_weight_values(train_labels, "balanced"))
+        self.assertNotEqual(values, class_weight_values(all_labels, "balanced"))
+        self.assertAlmostEqual(values["STAY"], 0.6, places=6)   # 12 / (2 * 10)
+        self.assertAlmostEqual(values["BRAKE"], 3.0, places=6)  # 12 / (2 * 2)
+        self.assertEqual(values["LEFT"], 0.0)
+        self.assertEqual(values["RIGHT"], 0.0)
+
+
+class SplitIsolationTests(unittest.TestCase):
+    @staticmethod
+    def rows(*spec):
+        return [make_row(action="STAY", split=split, seed=seed, episode=episode)
+                for split, seed, episode in spec]
+
+    def test_accepts_disjoint_splits(self):
+        by_split = validate_split_isolation(self.rows(
+            ("train", 1, "s:ep_1"), ("validation", 2, "s:ep_2"), ("test", 3, "s:ep_3"),
+        ))
+        self.assertEqual(len(by_split["validation"]), 1)
+
+    def test_rejects_a_validation_test_episode_collision(self):
+        with self.assertRaises(SystemExit) as caught:
+            validate_split_isolation(self.rows(
+                ("train", 1, "s:ep_1"), ("validation", 2, "s:ep_2"), ("test", 3, "s:ep_2"),
+            ))
+        self.assertIn("episode", str(caught.exception))
+
+    def test_rejects_a_seed_shared_by_validation_and_test(self):
+        with self.assertRaises(SystemExit) as caught:
+            validate_split_isolation(self.rows(
+                ("train", 1, "s:ep_1"), ("validation", 2, "s:ep_2"), ("test", 2, "s:ep_3"),
+            ))
+        self.assertIn("scenario seed", str(caught.exception))
+
+    def test_main_refuses_a_leaky_decision_file(self):
+        rows = self.rows(
+            ("train", 1, "s:ep_1"), ("validation", 2, "s:ep_2"), ("test", 3, "s:ep_2"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            decisions = Path(directory) / "decisions.jsonl"
+            decisions.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+            with self.assertRaises(SystemExit):
+                main([
+                    "--decisions", str(decisions),
+                    "--output-dir", str(Path(directory) / "out"),
+                    "--hidden", "8", "--l2", "0.001", "--epochs", "5",
+                ])
 
 
 if __name__ == "__main__":

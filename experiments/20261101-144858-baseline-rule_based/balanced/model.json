@@ -48,6 +48,12 @@
     "learning_rate": 0.02,
     "batch_size": 32,
     "class_weights": "balanced",
+    "class_weight_values": {
+      "LEFT": 12.733333,
+      "STAY": 0.274425,
+      "RIGHT": 15.916667,
+      "BRAKE": 4.658537
+    },
     "seed": 1234,
     "best_epoch": 44,
     "epochs_run": 74,
@@ -844,6 +850,31 @@
       -0.5876269070967738,
       -0.7050770886406842
     ]
+  },
+  "dataset_path": ".portable-dev\\pilot\\decisions.jsonl",
+  "decisions_sha256": "a4ff7096590b1e59ac635f086b546bf733eb9689d581517f51acce79d6903ce1",
+  "code": {
+    "commit": "630a9f93544ea03f1e91003ef6bf579294c8bfc0",
+    "dirty": true
+  },
+  "environment": {
+    "python": "3.11.15",
+    "python_implementation": "CPython",
+    "numpy": "2.4.6",
+    "platform": "Windows-10-10.0.26100-SP0",
+    "machine": "AMD64",
+    "processor": "ARMv8 (64-bit) Family 8 Model 1 Revision 101, Qualcomm Technologies Inc",
+    "cpu_count": 8,
+    "blas": {
+      "name": "scipy-openblas",
+      "version": "0.3.31.188.0",
+      "configuration": "OpenBLAS 0.3.31.188.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY SkylakeX MAX_THREADS=24"
+    },
+    "thread_env": {
+      "OMP_NUM_THREADS": null,
+      "OPENBLAS_NUM_THREADS": null,
+      "MKL_NUM_THREADS": null
+    }
   },
   "train_scenario_seeds": [
     11,

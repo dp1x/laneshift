@@ -11,6 +11,8 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
+import platform
 import sys
 from collections import Counter
 from datetime import datetime, timezone
@@ -18,10 +20,37 @@ from pathlib import Path
 
 import numpy as np
 
-from export_decisions import ACTIONS, FEATURE_NAMES, OUTCOME_COLUMNS, feature_vector
+from export_decisions import ACTIONS, FEATURE_NAMES, OUTCOME_COLUMNS, code_commit, feature_vector, file_sha256
 
 SCHEMA_VERSION = 1
 N_CLASSES = len(ACTIONS)
+
+
+def runtime_environment():
+    """Record what produced the numbers; floating-point reproduction is environment-bound."""
+    blas = {}
+    try:
+        blas = dict(np.show_config(mode="dicts").get("Build Dependencies", {}).get("blas", {}) or {})
+    except (AttributeError, TypeError, ValueError):
+        blas = {}
+    return {
+        "python": platform.python_version(),
+        "python_implementation": platform.python_implementation(),
+        "numpy": np.__version__,
+        "platform": platform.platform(),
+        "machine": platform.machine(),
+        "processor": platform.processor(),
+        "cpu_count": os.cpu_count(),
+        "blas": {
+            "name": blas.get("name"),
+            "version": blas.get("version"),
+            "configuration": blas.get("openblas configuration"),
+        },
+        "thread_env": {
+            name: os.environ.get(name)
+            for name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
+        },
+    }
 
 
 def load_rows(path):
@@ -264,14 +293,27 @@ class MLP:
         return {"history": history, "best_epoch": best_epoch, "best_validation_log_loss": best_loss}
 
 
-def class_weights(labels, mode, n_classes=N_CLASSES):
-    if mode == "none":
-        return None
+def class_weight_table(labels, n_classes=N_CLASSES):
+    """Inverse-frequency weights from `labels`; callers must pass training labels only."""
     counts = np.bincount(np.asarray(labels, dtype=np.int64), minlength=n_classes).astype(np.float64)
     weights = np.zeros(n_classes, dtype=np.float64)
     present = counts > 0
     weights[present] = len(labels) / (present.sum() * counts[present])
-    return weights[np.asarray(labels, dtype=np.int64)]
+    return weights
+
+
+def class_weights(labels, mode, n_classes=N_CLASSES):
+    if mode == "none":
+        return None
+    return class_weight_table(labels, n_classes)[np.asarray(labels, dtype=np.int64)]
+
+
+def class_weight_values(labels, mode, n_classes=N_CLASSES):
+    """The per-class weights as recorded in the metrics, for auditability."""
+    if mode == "none":
+        return None
+    table = class_weight_table(labels, n_classes)
+    return {ACTIONS[index]: round(float(table[index]), 6) for index in range(n_classes)}
 
 
 def summarize_by_seed(rows, probabilities):
@@ -314,8 +356,36 @@ def _split(rows, name):
     return [row for row in rows if row.get("split") == name]
 
 
+def validate_split_isolation(rows):
+    """Refuse to train unless every pair of splits is disjoint in seeds and episodes.
+
+    The exporter already guarantees this; the trainer re-checks because the
+    decision file is an external input that may have been edited or produced by
+    an older exporter.
+    """
+    by_split = {name: _split(rows, name) for name in ("train", "validation", "test")}
+    for name, split_rows in by_split.items():
+        if not split_rows:
+            raise SystemExit(f"split {name!r} has no rows")
+    for key, label in (("scenario_seed", "scenario seed"), ("episode_id", "episode")):
+        owner = {}
+        for name in ("train", "validation", "test"):
+            for value in {row.get(key) for row in by_split[name] if row.get(key) is not None}:
+                if value in owner:
+                    raise SystemExit(f"{label} {value!r} appears in both {owner[value]} and {name}")
+                owner[value] = name
+    return by_split
+
+
 def _distribution(rows):
     return {action: sum(1 for row in rows if row["action"] == action) for action in ACTIONS}
+
+
+def _dataset_identity(args):
+    path = getattr(args, "decisions", None)
+    if path and Path(path).is_file():
+        return {"path": str(path), "decisions_sha256": file_sha256(path)}
+    return {"path": str(path) if path else None, "decisions_sha256": None}
 
 
 def train(rows, args):
@@ -323,6 +393,7 @@ def train(rows, args):
     for name, split_rows in splits.items():
         if not split_rows:
             raise SystemExit(f"split {name!r} has no rows")
+    identity = _dataset_identity(args)
     train_features, train_labels = rows_to_arrays(splits["train"])
     validation_features, validation_labels = rows_to_arrays(splits["validation"])
     mean, std = standardizer(train_features)
@@ -370,9 +441,18 @@ def train(rows, args):
     metrics = {
         "schema_version": SCHEMA_VERSION,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "environment": runtime_environment(),
+        "code": code_commit(),
+        "determinism_note": (
+            "Weights and metrics reproduce exactly only on the same Python, NumPy and BLAS build "
+            "with the same thread settings; other builds can change floating-point summation order."
+        ),
         "dataset": {
             "rows": len(rows),
             "episodes": len({row["episode_id"] for row in rows}),
+            "path": identity["path"],
+            "decisions_sha256": identity["decisions_sha256"],
+            "label_sources": sorted({str(row.get("label_source")) for row in rows}),
             "episode_outcomes": dict(Counter(
                 str(row["episode_termination"]) for row in {
                     row["episode_id"]: row for row in rows
@@ -403,6 +483,7 @@ def train(rows, args):
             "learning_rate": best["entry"]["learning_rate"],
             "batch_size": args.batch_size,
             "class_weights": args.class_weights,
+            "class_weight_values": class_weight_values(train_labels, args.class_weights),
             "seed": args.seed,
             "best_epoch": best["entry"]["best_epoch"],
             "epochs_run": best["entry"]["epochs_run"],
@@ -437,6 +518,10 @@ def train(rows, args):
         "config": metrics["config"],
         "scaler": {"mean": mean.tolist(), "std": std.tolist()},
         "weights": {key: value.tolist() for key, value in model.params.items()},
+        "dataset_path": identity["path"],
+        "decisions_sha256": identity["decisions_sha256"],
+        "code": metrics["code"],
+        "environment": metrics["environment"],
         "train_scenario_seeds": metrics["dataset"]["splits"]["train"]["scenario_seeds"],
         "validation_scenario_seeds": metrics["dataset"]["splits"]["validation"]["scenario_seeds"],
         "test_scenario_seeds": metrics["dataset"]["splits"]["test"]["scenario_seeds"],
@@ -455,16 +540,23 @@ def predict_proba_from_model(model, rows):
     return softmax(logits)
 
 
-def format_report(metrics, model_document):
+def format_report(metrics):
     lines = []
     lines.append("# Supervised baseline pilot")
     lines.append("")
-    lines.append("Generated by `python/train_baseline.py`. Labels are `rule_based` policy actions, not human decisions.")
-    lines.append("")
     dataset = metrics["dataset"]
+    lines.append(f"Generated by `python/train_baseline.py`. Label sources: {', '.join(dataset['label_sources'])}.")
+    if "human" not in dataset["label_sources"]:
+        lines.append("The labels are policy actions, not human driving decisions.")
+    lines.append("")
     lines.append("## Dataset")
     lines.append("")
     lines.append(f"- rows: {dataset['rows']}, episodes: {dataset['episodes']}, endings {dataset['episode_outcomes']}")
+    if dataset.get("decisions_sha256"):
+        lines.append(f"- decisions sha256: {dataset['decisions_sha256']}")
+    code = metrics.get("code") or {}
+    if code.get("commit"):
+        lines.append(f"- code commit: {code['commit']} (dirty: {code.get('dirty')})")
     for name, split in dataset["splits"].items():
         lines.append(f"- {name}: {split['rows']} rows, {split['episodes']} episodes, seeds {split['scenario_seeds']}, actions {split['action_counts']}")
     lines.append("")
@@ -517,14 +609,28 @@ def format_report(metrics, model_document):
         row = metrics["splits"]["test"]["confusion_matrix"][index]
         lines.append(f"| {action} | " + " | ".join(str(value) for value in row) + " |")
     lines.append("")
+    lines.append("## Environment")
+    lines.append("")
+    environment = metrics.get("environment") or {}
+    blas = environment.get("blas") or {}
+    lines.append(
+        f"- python {environment.get('python')} ({environment.get('python_implementation')}), "
+        f"numpy {environment.get('numpy')}, {environment.get('platform')}, {environment.get('machine')}"
+    )
+    lines.append(f"- BLAS {blas.get('name')} {blas.get('version')}, cpu_count {environment.get('cpu_count')}")
+    lines.append(f"- thread env {environment.get('thread_env')}")
+    lines.append(
+        "- Weights and metrics reproduce exactly only on this Python/NumPy/BLAS build and thread setup; "
+        "other builds can change floating-point summation order."
+    )
+    lines.append("")
     lines.append("## Limits")
     lines.append("")
     lines.append("- The target is a deterministic rule, so a high score measures imitation, not driving skill.")
     lines.append("- Rows inside an episode are 0.1 s apart; the effective sample size is far below the row count.")
     lines.append("- No probabilities are recorded for rule-based labels, so calibration is of this MLP only.")
     lines.append("- A human-labelled dataset and a held-out human session are still required before fine-tuning Kev.")
-    lines.append("")
-    return "\n".join(lines)
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def main(argv=None):
@@ -535,12 +641,13 @@ def main(argv=None):
     unknown = {row.get("split") for row in rows} - {"train", "validation", "test"}
     if unknown:
         raise SystemExit(f"decision rows contain unsupported split labels: {sorted(map(str, unknown))}")
+    validate_split_isolation(rows)
     model_document, metrics = train(rows, args)
     output = Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
     (output / "model.json").write_text(json.dumps(model_document, indent=2) + "\n", encoding="utf-8")
     (output / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
-    (output / "report.md").write_text(format_report(metrics, model_document) + "\n", encoding="utf-8")
+    (output / "report.md").write_text(format_report(metrics), encoding="utf-8")
     summary = {
         "output_dir": str(output),
         "selected": metrics["config"],

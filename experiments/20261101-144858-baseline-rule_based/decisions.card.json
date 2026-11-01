@@ -1,9 +1,16 @@
 {
   "schema_version": 1,
-  "created_at_utc": "2026-11-01T10:53:15.178544+00:00",
+  "created_at_utc": "2026-11-01T11:09:31.913230+00:00",
   "source": "LaneShift simulation recordings joined by python/export_decisions.py",
+  "code_commit": {
+    "commit": "630a9f93544ea03f1e91003ef6bf579294c8bfc0",
+    "dirty": true
+  },
   "conditions": {
     "policy": "rule_based",
+    "label_sources": [
+      "rule_based"
+    ],
     "decision_cadence_hz": 10,
     "telemetry_cadence_hz": 30,
     "episode_duration_s": 30.0,
@@ -191,5 +198,7 @@
     "All state is simulated ground truth: there is no phone capture, perception pipeline or human play.",
     "Rows are produced from one headless session per runner invocation; split groups are scenario seeds.",
     "Episode outcome columns are for evaluation only and must never enter the model input."
-  ]
+  ],
+  "decisions_file": ".portable-dev\\pilot\\decisions.jsonl",
+  "decisions_sha256": "a4ff7096590b1e59ac635f086b546bf733eb9689d581517f51acce79d6903ce1"
 }

@@ -109,10 +109,10 @@ repeat across processes), `scenario_seed`, `split`, `decision_seq`, `tick`,
   `lane_change_in_progress`, `lane_change_cooldown`.
 - Legality: `legal_actions` (`LEFT|STAY|RIGHT|BRAKE`) plus one `legal_*` flag
   per action.
-- Nearest three traffic vehicles, ordered by absolute relative distance (the
-  same ordering `kev_state.compact_kev_state` uses): `v{n}_present`,
-  `v{n}_lane`, `v{n}_distance`, `v{n}_rel_speed`, `v{n}_ttc`,
-  `v{n}_in_player_lane`.
+- Nearest three traffic vehicles, ordered by absolute relative distance rounded
+  to 2 decimals, with snapshot order as the tie-break — the same ordering
+  `kev_state.compact_kev_state` uses: `v{n}_present`, `v{n}_lane`,
+  `v{n}_distance`, `v{n}_rel_speed`, `v{n}_ttc`, `v{n}_in_player_lane`.
 - Lane aggregates over the full traffic list: `nearest_same_lane_gap`,
   `nearest_left_gap`, `nearest_right_gap`, `min_ttc`.
 
@@ -157,8 +157,9 @@ all of its 0.1 s-apart decisions stay in one split. Validation and test are
 | validation | 3, 41, 59 | 238 | 3 | LEFT 3, STAY 201, RIGHT 3, BRAKE 31 |
 | test | 7, 29, 61 | 346 | 3 | LEFT 6, STAY 295, RIGHT 6, BRAKE 39 |
 
-The export refuses to write if any seed or episode appears in more than one
-split, or if a split is empty.
+The export refuses to write unless **all three pairs** of splits are disjoint in
+both scenario seeds and episode ids, and unless every split is non-empty. The
+trainer re-checks the same two properties when it loads the decision file.
 
 Row counts overstate evidence: decisions inside one episode are 0.1 s apart, so
 the effective sample size is closer to the 15 episodes than to 1,348 rows. The
@@ -168,10 +169,13 @@ report therefore also breaks validation and test down per seed.
 
 Small MLP, one `tanh` hidden layer and a 4-way softmax, trained with Adam and
 L2 in NumPy (no new dependency). Features are standardised with train-split
-statistics only. Hyperparameters are chosen from a six-point grid
+statistics only, and balanced class weights are computed from train labels
+only. Hyperparameters are chosen from a six-point grid
 (hidden 8/16/32 × L2 1e-4/1e-3) on **validation log loss**; the test split is
-scored once, after selection. The run is deterministic: seed 1234 reproduces
-weights and metrics exactly.
+scored once, after selection. Seed 1234 reproduces the saved weights and
+metrics exactly on the same Python/NumPy/BLAS build and thread settings;
+another BLAS build can change floating-point summation order. The exact
+environment is recorded in `metrics.json` and `model.json`.
 
 Two variants are reported. `none` trains on the natural class distribution;
 `balanced` reweights the loss by inverse class frequency. Both use the same
@@ -235,7 +239,8 @@ Worked:
 - The recording → export → training loop is reproducible end to end, including
   namespacing episodes across sessions and excluding outcome columns by test.
 - The dataset is non-degenerate: density 1.5 produced 156 non-STAY decisions
-  (11.6%), enough to train and score four classes.
+  (11.6%), so all four classes appear — but the turn classes are thin: 45 turn
+  decisions overall and only 6 LEFT / 6 RIGHT in the held-out test split.
 - Seed-grouped held-out evaluation works, and per-seed results expose how much
   of the headline number comes from a single seed.
 - Both variants beat the STAY baseline on every metric, including calibration,
@@ -249,9 +254,11 @@ Failed or weak:
 - Per-class numbers for LEFT and RIGHT rest on 6 examples each in test; they are
   indicative, not measured.
 - The unweighted model is close to the majority baseline on accuracy
-  (+3.2 points); most of its advantage is in macro F1 and in log loss, which is
-  the more honest reading: it learned the BRAKE condition reliably and the
-  turn conditions only partly.
+  (+3.2 points); most of its advantage is in macro F1 and in log loss. BRAKE is
+  the only class it learns at a useful rate — recall 22/39 = 0.5641, precision
+  0.6667, F1 0.6111 — while the turn classes mostly collapse to STAY (LEFT 1/6
+  correct, RIGHT 0/6). That is better than a constant predictor and much worse
+  than the rule it is imitating.
 - Rule-based decisions carry no probability distribution, so the labelled
   policy's own calibration cannot be measured from this dataset.
 - 8 of 15 episodes crashed, several within 7 s (seeds 31, 53, 67). Density 1.5
@@ -288,25 +295,32 @@ and it is gated on human data:
    same schema this export consumes.
 2. **Export with session grouping.** Human sessions must be the grouping unit,
    not just seeds: add a `--group-by session` mode to `export_decisions.py` so
-   all decisions from one person's session land in exactly one split. This is
-   the only code change the export needs before human data.
-3. **Review before training.** Use the existing `dataset_prep.py --format kev`
+   all decisions from one person's session land in exactly one split.
+3. **Handle human provenance end to end.** The export is not yet safe for human
+   data as-is: the data card's `limits` still say there is no human play, the
+   training report only distinguishes human when the label source says so, and
+   rule-based and human rows would currently be mixed without an approval or
+   source-allowlist gate. Human export needs (a) a data-card profile for human
+   sessions, (b) a source allowlist / `--include-sources human` gate shared with
+   the Kev export in `dataset_prep.py`, and (c) a check that refuses a mixed
+   rule-based + human dataset unless the caller asks for it explicitly.
+4. **Review before training.** Use the existing `dataset_prep.py --format kev`
    approval file (`example_id`, `action`, `approved=true`) and
    `--include-sources human`; rule-based rows must never be mixed in silently.
-4. **Retrain this baseline on human labels.** Same features, same metrics, same
+5. **Retrain this baseline on human labels.** Same features, same metrics, same
    held-out seeds. Compare its macro F1 and ECE on human data with the numbers
    above; that difference measures how much of the rule the model actually
    captured versus how much was rule determinism.
-5. **Fine-tune Kev** on the approved human export, label the checkpoint
+6. **Fine-tune Kev** on the approved human export, label the checkpoint
    `fine_tuned_model`, and record its SHA-256. Then run the matched comparison
    (`python/experiment_runner.py`) of original Kev, fine-tuned Kev, the
    rule-based policy and this MLP as a controller on held-out seeds, reporting
    accuracy, macro F1, log loss, Brier, ECE, action distribution, score,
    survival and collisions.
-6. **Only then** state whether fine-tuning helped, on which seeds, and at what
+7. **Only then** state whether fine-tuning helped, on which seeds, and at what
    calibration cost.
 
-Until step 1-3 exist, the honest claim is: the pipeline produces a leakage-free
+Until steps 1-4 exist, the honest claim is: the pipeline produces a leakage-free
 decision dataset and a small model that imitates the rule-based policy
 partially, on held-out seeds.
 
@@ -320,5 +334,13 @@ partially, on held-out seeds.
 - `experiments/20261101-144858-baseline-rule_based/{none,balanced}/` — saved
   model, metrics and report for both variants.
 
-Verification: `run_tests.bat` passes (65 Python tests and the six Godot test
+The decision file itself lives under the gitignored `.portable-dev/`, so the
+data card, `metrics.json` and `model.json` record its SHA-256
+(`decisions_sha256`) and the git HEAD plus dirty flag used to produce it. A
+fresh clone can verify a regenerated dataset against those hashes. The
+committed artifacts were generated before the commit that contains them, so
+their `code_commit.dirty` flag is `true` and the recorded commit is that
+commit's parent; the dataset hash is the stable identifier.
+
+Verification: `run_tests.bat` passes (73 Python tests and the six Godot test
 scripts).
