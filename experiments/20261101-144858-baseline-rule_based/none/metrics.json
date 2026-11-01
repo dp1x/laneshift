@@ -1,0 +1,988 @@
+{
+  "schema_version": 1,
+  "created_at_utc": "2026-11-01T10:53:17.131647+00:00",
+  "dataset": {
+    "rows": 1348,
+    "episodes": 15,
+    "episode_outcomes": {
+      "crash": 8,
+      "timeout": 7
+    },
+    "crashes": 8,
+    "splits": {
+      "train": {
+        "rows": 764,
+        "episodes": 9,
+        "scenario_seeds": [
+          11,
+          19,
+          23,
+          31,
+          37,
+          43,
+          47,
+          53,
+          67
+        ],
+        "action_counts": {
+          "LEFT": 15,
+          "STAY": 696,
+          "RIGHT": 12,
+          "BRAKE": 41
+        }
+      },
+      "validation": {
+        "rows": 238,
+        "episodes": 3,
+        "scenario_seeds": [
+          3,
+          41,
+          59
+        ],
+        "action_counts": {
+          "LEFT": 3,
+          "STAY": 201,
+          "RIGHT": 3,
+          "BRAKE": 31
+        }
+      },
+      "test": {
+        "rows": 346,
+        "episodes": 3,
+        "scenario_seeds": [
+          7,
+          29,
+          61
+        ],
+        "action_counts": {
+          "LEFT": 6,
+          "STAY": 295,
+          "RIGHT": 6,
+          "BRAKE": 39
+        }
+      }
+    }
+  },
+  "features": {
+    "names": [
+      "player_lane_0",
+      "player_lane_1",
+      "player_lane_2",
+      "target_lane_delta",
+      "lane_change_in_progress",
+      "lane_change_cooldown",
+      "player_speed_scaled",
+      "legal_LEFT",
+      "legal_STAY",
+      "legal_RIGHT",
+      "legal_BRAKE",
+      "v1_present",
+      "v1_lane",
+      "v1_distance",
+      "v1_rel_speed",
+      "v1_ttc",
+      "v1_in_player_lane",
+      "v2_present",
+      "v2_lane",
+      "v2_distance",
+      "v2_rel_speed",
+      "v2_ttc",
+      "v2_in_player_lane",
+      "v3_present",
+      "v3_lane",
+      "v3_distance",
+      "v3_rel_speed",
+      "v3_ttc",
+      "v3_in_player_lane",
+      "nearest_same_lane_gap",
+      "nearest_left_gap",
+      "nearest_right_gap",
+      "min_ttc"
+    ],
+    "count": 33,
+    "excluded_outcome_columns": [
+      "episode_score",
+      "episode_distance",
+      "episode_survival_time",
+      "episode_collisions",
+      "episode_overtaken",
+      "episode_termination",
+      "episode_success"
+    ]
+  },
+  "config": {
+    "hidden": 16,
+    "hidden_units": 16,
+    "l2": 0.001,
+    "learning_rate": 0.02,
+    "batch_size": 32,
+    "class_weights": "none",
+    "seed": 1234,
+    "best_epoch": 72,
+    "epochs_run": 102,
+    "selection_metric": "validation log loss (unweighted)"
+  },
+  "grid": [
+    {
+      "hidden": 8,
+      "l2": 0.0001,
+      "learning_rate": 0.02,
+      "best_epoch": 10,
+      "validation_log_loss": 0.341942,
+      "epochs_run": 40
+    },
+    {
+      "hidden": 8,
+      "l2": 0.001,
+      "learning_rate": 0.02,
+      "best_epoch": 12,
+      "validation_log_loss": 0.378332,
+      "epochs_run": 42
+    },
+    {
+      "hidden": 16,
+      "l2": 0.0001,
+      "learning_rate": 0.02,
+      "best_epoch": 50,
+      "validation_log_loss": 0.269915,
+      "epochs_run": 80
+    },
+    {
+      "hidden": 16,
+      "l2": 0.001,
+      "learning_rate": 0.02,
+      "best_epoch": 72,
+      "validation_log_loss": 0.252063,
+      "epochs_run": 102
+    },
+    {
+      "hidden": 32,
+      "l2": 0.0001,
+      "learning_rate": 0.02,
+      "best_epoch": 11,
+      "validation_log_loss": 0.412181,
+      "epochs_run": 41
+    },
+    {
+      "hidden": 32,
+      "l2": 0.001,
+      "learning_rate": 0.02,
+      "best_epoch": 40,
+      "validation_log_loss": 0.298115,
+      "epochs_run": 70
+    }
+  ],
+  "splits": {
+    "train": {
+      "rows": 764,
+      "accuracy": 0.9804,
+      "macro_f1": 0.8406,
+      "log_loss": 0.0598,
+      "brier": 0.0315,
+      "ece": 0.0095,
+      "mean_confidence": 0.9747,
+      "per_class": {
+        "LEFT": {
+          "precision": 1.0,
+          "recall": 0.4667,
+          "f1": 0.6364,
+          "support": 15
+        },
+        "STAY": {
+          "precision": 0.9803,
+          "recall": 0.9986,
+          "f1": 0.9893,
+          "support": 696
+        },
+        "RIGHT": {
+          "precision": 0.8889,
+          "recall": 0.6667,
+          "f1": 0.7619,
+          "support": 12
+        },
+        "BRAKE": {
+          "precision": 1.0,
+          "recall": 0.9512,
+          "f1": 0.975,
+          "support": 41
+        }
+      },
+      "actual_counts": {
+        "LEFT": 15,
+        "STAY": 696,
+        "RIGHT": 12,
+        "BRAKE": 41
+      },
+      "predicted_counts": {
+        "LEFT": 7,
+        "STAY": 709,
+        "RIGHT": 9,
+        "BRAKE": 39
+      },
+      "confusion_matrix": [
+        [
+          7,
+          8,
+          0,
+          0
+        ],
+        [
+          0,
+          695,
+          1,
+          0
+        ],
+        [
+          0,
+          4,
+          8,
+          0
+        ],
+        [
+          0,
+          2,
+          0,
+          39
+        ]
+      ],
+      "calibration_bins": [
+        {
+          "bin": [
+            0.3,
+            0.4
+          ],
+          "count": 1,
+          "confidence": 0.3931,
+          "accuracy": 0.0
+        },
+        {
+          "bin": [
+            0.4,
+            0.5
+          ],
+          "count": 1,
+          "confidence": 0.4937,
+          "accuracy": 0.0
+        },
+        {
+          "bin": [
+            0.5,
+            0.6
+          ],
+          "count": 13,
+          "confidence": 0.5611,
+          "accuracy": 0.6923
+        },
+        {
+          "bin": [
+            0.6,
+            0.7
+          ],
+          "count": 6,
+          "confidence": 0.6435,
+          "accuracy": 1.0
+        },
+        {
+          "bin": [
+            0.7,
+            0.8
+          ],
+          "count": 16,
+          "confidence": 0.7537,
+          "accuracy": 0.875
+        },
+        {
+          "bin": [
+            0.8,
+            0.9
+          ],
+          "count": 13,
+          "confidence": 0.8478,
+          "accuracy": 0.8462
+        },
+        {
+          "bin": [
+            0.9,
+            1.0
+          ],
+          "count": 714,
+          "confidence": 0.9937,
+          "accuracy": 0.993
+        }
+      ],
+      "per_seed": {
+        "11": {
+          "rows": 128,
+          "episodes": 1,
+          "accuracy": 1.0,
+          "macro_f1": 1.0,
+          "log_loss": 0.0272,
+          "termination": [
+            "timeout"
+          ]
+        },
+        "19": {
+          "rows": 128,
+          "episodes": 1,
+          "accuracy": 0.9766,
+          "macro_f1": 0.9429,
+          "log_loss": 0.0787,
+          "termination": [
+            "timeout"
+          ]
+        },
+        "23": {
+          "rows": 128,
+          "episodes": 1,
+          "accuracy": 0.9688,
+          "macro_f1": 0.4959,
+          "log_loss": 0.0872,
+          "termination": [
+            "timeout"
+          ]
+        },
+        "31": {
+          "rows": 26,
+          "episodes": 1,
+          "accuracy": 0.9615,
+          "macro_f1": 0.9111,
+          "log_loss": 0.1084,
+          "termination": [
+            "crash"
+          ]
+        },
+        "37": {
+          "rows": 104,
+          "episodes": 1,
+          "accuracy": 0.9615,
+          "macro_f1": 0.6615,
+          "log_loss": 0.0861,
+          "termination": [
+            "crash"
+          ]
+        },
+        "43": {
+          "rows": 128,
+          "episodes": 1,
+          "accuracy": 1.0,
+          "macro_f1": 1.0,
+          "log_loss": 0.0086,
+          "termination": [
+            "timeout"
+          ]
+        },
+        "47": {
+          "rows": 82,
+          "episodes": 1,
+          "accuracy": 0.9878,
+          "macro_f1": 0.9151,
+          "log_loss": 0.0444,
+          "termination": [
+            "crash"
+          ]
+        },
+        "53": {
+          "rows": 26,
+          "episodes": 1,
+          "accuracy": 0.9615,
+          "macro_f1": 0.4902,
+          "log_loss": 0.0379,
+          "termination": [
+            "crash"
+          ]
+        },
+        "67": {
+          "rows": 14,
+          "episodes": 1,
+          "accuracy": 0.9286,
+          "macro_f1": 0.4815,
+          "log_loss": 0.2499,
+          "termination": [
+            "crash"
+          ]
+        }
+      }
+    },
+    "validation": {
+      "rows": 238,
+      "accuracy": 0.9286,
+      "macro_f1": 0.6761,
+      "log_loss": 0.2521,
+      "brier": 0.1212,
+      "ece": 0.0368,
+      "mean_confidence": 0.9329,
+      "per_class": {
+        "LEFT": {
+          "precision": 1.0,
+          "recall": 0.3333,
+          "f1": 0.5,
+          "support": 3
+        },
+        "STAY": {
+          "precision": 0.9259,
+          "recall": 0.995,
+          "f1": 0.9592,
+          "support": 201
+        },
+        "RIGHT": {
+          "precision": 1.0,
+          "recall": 0.3333,
+          "f1": 0.5,
+          "support": 3
+        },
+        "BRAKE": {
+          "precision": 0.95,
+          "recall": 0.6129,
+          "f1": 0.7451,
+          "support": 31
+        }
+      },
+      "actual_counts": {
+        "LEFT": 3,
+        "STAY": 201,
+        "RIGHT": 3,
+        "BRAKE": 31
+      },
+      "predicted_counts": {
+        "LEFT": 1,
+        "STAY": 216,
+        "RIGHT": 1,
+        "BRAKE": 20
+      },
+      "confusion_matrix": [
+        [
+          1,
+          2,
+          0,
+          0
+        ],
+        [
+          0,
+          200,
+          0,
+          1
+        ],
+        [
+          0,
+          2,
+          1,
+          0
+        ],
+        [
+          0,
+          12,
+          0,
+          19
+        ]
+      ],
+      "calibration_bins": [
+        {
+          "bin": [
+            0.3,
+            0.4
+          ],
+          "count": 1,
+          "confidence": 0.3706,
+          "accuracy": 1.0
+        },
+        {
+          "bin": [
+            0.4,
+            0.5
+          ],
+          "count": 2,
+          "confidence": 0.4778,
+          "accuracy": 1.0
+        },
+        {
+          "bin": [
+            0.5,
+            0.6
+          ],
+          "count": 8,
+          "confidence": 0.5531,
+          "accuracy": 0.75
+        },
+        {
+          "bin": [
+            0.6,
+            0.7
+          ],
+          "count": 8,
+          "confidence": 0.6475,
+          "accuracy": 0.625
+        },
+        {
+          "bin": [
+            0.7,
+            0.8
+          ],
+          "count": 11,
+          "confidence": 0.7411,
+          "accuracy": 0.6364
+        },
+        {
+          "bin": [
+            0.8,
+            0.9
+          ],
+          "count": 18,
+          "confidence": 0.8548,
+          "accuracy": 0.8889
+        },
+        {
+          "bin": [
+            0.9,
+            1.0
+          ],
+          "count": 190,
+          "confidence": 0.9871,
+          "accuracy": 0.9684
+        }
+      ],
+      "per_seed": {
+        "3": {
+          "rows": 54,
+          "episodes": 1,
+          "accuracy": 0.9815,
+          "macro_f1": 0.4953,
+          "log_loss": 0.0251,
+          "termination": [
+            "crash"
+          ]
+        },
+        "41": {
+          "rows": 128,
+          "episodes": 1,
+          "accuracy": 0.8906,
+          "macro_f1": 0.6678,
+          "log_loss": 0.4076,
+          "termination": [
+            "timeout"
+          ]
+        },
+        "59": {
+          "rows": 56,
+          "episodes": 1,
+          "accuracy": 0.9643,
+          "macro_f1": 0.6952,
+          "log_loss": 0.1153,
+          "termination": [
+            "crash"
+          ]
+        }
+      }
+    },
+    "test": {
+      "rows": 346,
+      "accuracy": 0.8844,
+      "macro_f1": 0.4426,
+      "log_loss": 0.3587,
+      "brier": 0.1763,
+      "ece": 0.0671,
+      "mean_confidence": 0.9444,
+      "per_class": {
+        "LEFT": {
+          "precision": 0.3333,
+          "recall": 0.1667,
+          "f1": 0.2222,
+          "support": 6
+        },
+        "STAY": {
+          "precision": 0.9159,
+          "recall": 0.9593,
+          "f1": 0.9371,
+          "support": 295
+        },
+        "RIGHT": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 6
+        },
+        "BRAKE": {
+          "precision": 0.6667,
+          "recall": 0.5641,
+          "f1": 0.6111,
+          "support": 39
+        }
+      },
+      "actual_counts": {
+        "LEFT": 6,
+        "STAY": 295,
+        "RIGHT": 6,
+        "BRAKE": 39
+      },
+      "predicted_counts": {
+        "LEFT": 3,
+        "STAY": 309,
+        "RIGHT": 1,
+        "BRAKE": 33
+      },
+      "confusion_matrix": [
+        [
+          1,
+          4,
+          0,
+          1
+        ],
+        [
+          1,
+          283,
+          1,
+          10
+        ],
+        [
+          0,
+          6,
+          0,
+          0
+        ],
+        [
+          1,
+          16,
+          0,
+          22
+        ]
+      ],
+      "calibration_bins": [
+        {
+          "bin": [
+            0.5,
+            0.6
+          ],
+          "count": 15,
+          "confidence": 0.5554,
+          "accuracy": 0.4
+        },
+        {
+          "bin": [
+            0.6,
+            0.7
+          ],
+          "count": 9,
+          "confidence": 0.6418,
+          "accuracy": 0.7778
+        },
+        {
+          "bin": [
+            0.7,
+            0.8
+          ],
+          "count": 10,
+          "confidence": 0.7377,
+          "accuracy": 0.5
+        },
+        {
+          "bin": [
+            0.8,
+            0.9
+          ],
+          "count": 20,
+          "confidence": 0.8458,
+          "accuracy": 0.6
+        },
+        {
+          "bin": [
+            0.9,
+            1.0
+          ],
+          "count": 292,
+          "confidence": 0.9875,
+          "accuracy": 0.9452
+        }
+      ],
+      "per_seed": {
+        "7": {
+          "rows": 90,
+          "episodes": 1,
+          "accuracy": 0.8778,
+          "macro_f1": 0.4992,
+          "log_loss": 0.5533,
+          "termination": [
+            "crash"
+          ]
+        },
+        "29": {
+          "rows": 128,
+          "episodes": 1,
+          "accuracy": 0.9375,
+          "macro_f1": 0.429,
+          "log_loss": 0.1625,
+          "termination": [
+            "timeout"
+          ]
+        },
+        "61": {
+          "rows": 128,
+          "episodes": 1,
+          "accuracy": 0.8359,
+          "macro_f1": 0.3616,
+          "log_loss": 0.4181,
+          "termination": [
+            "timeout"
+          ]
+        }
+      }
+    }
+  },
+  "baselines": {
+    "majority": {
+      "class": "STAY",
+      "splits": {
+        "train": {
+          "rows": 764,
+          "accuracy": 0.911,
+          "macro_f1": 0.2384,
+          "log_loss": 2.4593,
+          "brier": 0.178,
+          "ece": 0.089,
+          "mean_confidence": 1.0,
+          "per_class": {
+            "LEFT": {
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "support": 15
+            },
+            "STAY": {
+              "precision": 0.911,
+              "recall": 1.0,
+              "f1": 0.9534,
+              "support": 696
+            },
+            "RIGHT": {
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "support": 12
+            },
+            "BRAKE": {
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "support": 41
+            }
+          },
+          "actual_counts": {
+            "LEFT": 15,
+            "STAY": 696,
+            "RIGHT": 12,
+            "BRAKE": 41
+          },
+          "predicted_counts": {
+            "LEFT": 0,
+            "STAY": 764,
+            "RIGHT": 0,
+            "BRAKE": 0
+          },
+          "confusion_matrix": [
+            [
+              0,
+              15,
+              0,
+              0
+            ],
+            [
+              0,
+              696,
+              0,
+              0
+            ],
+            [
+              0,
+              12,
+              0,
+              0
+            ],
+            [
+              0,
+              41,
+              0,
+              0
+            ]
+          ],
+          "calibration_bins": [
+            {
+              "bin": [
+                0.9,
+                1.0
+              ],
+              "count": 764,
+              "confidence": 1.0,
+              "accuracy": 0.911
+            }
+          ]
+        },
+        "validation": {
+          "rows": 238,
+          "accuracy": 0.8445,
+          "macro_f1": 0.2289,
+          "log_loss": 4.2956,
+          "brier": 0.3109,
+          "ece": 0.1555,
+          "mean_confidence": 1.0,
+          "per_class": {
+            "LEFT": {
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "support": 3
+            },
+            "STAY": {
+              "precision": 0.8445,
+              "recall": 1.0,
+              "f1": 0.9157,
+              "support": 201
+            },
+            "RIGHT": {
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "support": 3
+            },
+            "BRAKE": {
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "support": 31
+            }
+          },
+          "actual_counts": {
+            "LEFT": 3,
+            "STAY": 201,
+            "RIGHT": 3,
+            "BRAKE": 31
+          },
+          "predicted_counts": {
+            "LEFT": 0,
+            "STAY": 238,
+            "RIGHT": 0,
+            "BRAKE": 0
+          },
+          "confusion_matrix": [
+            [
+              0,
+              3,
+              0,
+              0
+            ],
+            [
+              0,
+              201,
+              0,
+              0
+            ],
+            [
+              0,
+              3,
+              0,
+              0
+            ],
+            [
+              0,
+              31,
+              0,
+              0
+            ]
+          ],
+          "calibration_bins": [
+            {
+              "bin": [
+                0.9,
+                1.0
+              ],
+              "count": 238,
+              "confidence": 1.0,
+              "accuracy": 0.8445
+            }
+          ]
+        },
+        "test": {
+          "rows": 346,
+          "accuracy": 0.8526,
+          "macro_f1": 0.2301,
+          "log_loss": 4.0728,
+          "brier": 0.2948,
+          "ece": 0.1474,
+          "mean_confidence": 1.0,
+          "per_class": {
+            "LEFT": {
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "support": 6
+            },
+            "STAY": {
+              "precision": 0.8526,
+              "recall": 1.0,
+              "f1": 0.9204,
+              "support": 295
+            },
+            "RIGHT": {
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "support": 6
+            },
+            "BRAKE": {
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "support": 39
+            }
+          },
+          "actual_counts": {
+            "LEFT": 6,
+            "STAY": 295,
+            "RIGHT": 6,
+            "BRAKE": 39
+          },
+          "predicted_counts": {
+            "LEFT": 0,
+            "STAY": 346,
+            "RIGHT": 0,
+            "BRAKE": 0
+          },
+          "confusion_matrix": [
+            [
+              0,
+              6,
+              0,
+              0
+            ],
+            [
+              0,
+              295,
+              0,
+              0
+            ],
+            [
+              0,
+              6,
+              0,
+              0
+            ],
+            [
+              0,
+              39,
+              0,
+              0
+            ]
+          ],
+          "calibration_bins": [
+            {
+              "bin": [
+                0.9,
+                1.0
+              ],
+              "count": 346,
+              "confidence": 1.0,
+              "accuracy": 0.8526
+            }
+          ]
+        }
+      }
+    }
+  }
+}
