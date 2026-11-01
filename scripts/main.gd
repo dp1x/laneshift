@@ -128,6 +128,7 @@ var last_external_action_msec: int = 0
 var websocket_port: int = 8766
 var decision_state_history: Dictionary = {}
 var decision_state_history_seconds: float = 180.0
+var recent_action_history: Array = []
 var last_score_milestone: int = 0
 
 var build_commit: String = "dev"
@@ -1064,6 +1065,7 @@ func start_game(seed: int = -1, cfg: Dictionary = {}, requested_episode_id: Stri
 	action_event_sequence = 0
 	last_score_milestone = 0
 	decision_state_history.clear()
+	recent_action_history.clear()
 	last_external_action_msec = Time.get_ticks_msec()
 	set_meta("prev_left", false)
 	set_meta("prev_right", false)
@@ -1298,9 +1300,21 @@ func _submit_action(action: String, duration: float, control_source: String, lab
 		"accepted": accepted,
 		"control_source": control_source,
 		"label_source": label_source,
+		"human_action": action if label_source == "human" and accepted else null,
+		"human_adjudicated_action": null,
+		"recent_actions": recent_action_history.duplicate(true),
 		"decision_metadata": decision_metadata,
 		"state_before": state_before
 	})
+	if accepted:
+		recent_action_history.append({
+			"decision_seq": action_event_sequence,
+			"action": action,
+			"label_source": label_source,
+			"physics_tick": decision_tick,
+		})
+		if recent_action_history.size() > 12:
+			recent_action_history.pop_front()
 	return accepted
 
 func _log_score_milestones(current_score: float) -> void:
@@ -1415,8 +1429,8 @@ func _physics_process(delta: float) -> void:
 		if external_control and not auto_run and Time.get_ticks_msec() - last_external_action_msec > external_timeout_msec:
 			external_control = false
 			control_mode = "human"
-			_log_event("controller_timeout", {"fallback_control": "human"})
-			_submit_action("STAY", 0.1, "human", "human")
+			_log_event("controller_timeout", {"fallback_control": "controller_fallback"})
+			_submit_action("STAY", 0.1, "controller_fallback", "controller_fallback")
 		sim.step(delta * sim_speed_scale)
 		_log_score_milestones(sim.score)
 		if sim.status != "running":
