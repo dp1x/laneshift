@@ -107,7 +107,6 @@ def prepare_records(telemetry_records, event_records, episode_records):
         "episodes_without_summary": 0,
         "illegal_labels": 0,
         "duplicate_actions": 0,
-        "illegal_labels": 0,
     }
 
     for row in telemetry_records:
