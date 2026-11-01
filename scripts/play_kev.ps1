@@ -38,11 +38,13 @@ if ($packaged) {
     $pythonDir = Join-Path $root "controller"
     $nextExe = Join-Path $root "LANESHIFT-next.exe"
     $gameExe = if (Test-Path $nextExe) { $nextExe } else { Join-Path $root "LANESHIFT.exe" }
+    $runtimeModel = Join-Path $root "runtime\kev07b_fp16_L256.onnx"
+    $runtimeTokenizer = Join-Path $root "runtime\tokenizer.json"
     if (-not $Model) {
-        $Model = if (Test-Path $cModel) { $cModel } else { Join-Path $root "runtime\kev07b_fp16_L256.onnx" }
+        $Model = if (Test-Path $runtimeModel) { $runtimeModel } else { $cModel }
     }
     if (-not $Tokenizer) {
-        $Tokenizer = if (Test-Path $cTokenizer) { $cTokenizer } else { Join-Path $root "runtime\tokenizer.json" }
+        $Tokenizer = if (Test-Path $runtimeTokenizer) { $runtimeTokenizer } else { $cTokenizer }
     }
 } else {
     $pythonExe = "python"

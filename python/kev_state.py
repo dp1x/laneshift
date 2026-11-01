@@ -24,19 +24,16 @@ ACTION_CRITERIA = {
 LANE_NAMES = ("LEFT", "CENTER", "RIGHT")
 
 KEV_LANE_INSTRUCTIONS = (
-    "Choose the safest legal next action. Avoid collisions first. "
-    "Check both front and rear traffic in the destination lane before changing "
-    "lanes. Do not enter a lane only because its front is clear. Choose STAY "
-    "only when the current lane is acceptably safe; do not choose STAY merely "
-    "because it is the default. Choose BRAKE when slowing is safer than the "
-    "available lane changes. Select exactly one option from the legal choices."
+    "Choose the safest legal action. Avoid collisions. Check front and rear "
+    "clearance before changing lanes. Stay only when the current lane is safe. "
+    "Brake when no lane change is safe. Choose exactly one legal option."
 )
 
 ACTION_CRITERIA_LANE = {
-    "LEFT": "Move one lane left only if the left lane has safe front and rear clearance.",
-    "STAY": "Remain in the current lane only if the current lane is acceptably safe.",
-    "RIGHT": "Move one lane right only if the right lane has safe front and rear clearance.",
-    "BRAKE": "Reduce speed without changing lanes when slowing is safer than a lane change.",
+    "LEFT": "Move left only if the left lane has safe front and rear clearance.",
+    "STAY": "Stay only if the current lane is safe and changing lanes adds risk.",
+    "RIGHT": "Move right only if the right lane has safe front and rear clearance.",
+    "BRAKE": "Slow down when no lane change is safe.",
 }
 
 
@@ -118,9 +115,14 @@ def lane_observation(state: dict[str, Any]) -> dict[str, Any]:
             "behind": describe(behind),
         })
 
+    target_lane = player.get("target_lane", player.get("lane", 1))
     return {
         "player": {
             "lane": LANE_NAMES[int(player.get("lane", 1))] if player.get("lane") in (0, 1, 2) else "UNKNOWN",
+            "target_lane": LANE_NAMES[int(target_lane)] if target_lane in (0, 1, 2) else "UNKNOWN",
+            "lane_change_in_progress": bool(player.get("lane_change_in_progress", False)),
+            "lane_change_cooldown_s": round(float(player.get("lane_change_cooldown", 0.0)), 2),
+            "previous_action": str(player.get("current_action", "STAY")).upper(),
             "speed_mps": round(float(player.get("speed", 0.0)), 2),
             "braking": bool(player.get("braking", False)),
         },
@@ -134,7 +136,9 @@ def render_lane_state(observation: dict[str, Any]) -> str:
     player = observation["player"]
     lines = [
         "LANESHIFT DECISION STATE",
-        f"Player: lane {player['lane']}, speed {player['speed_mps']:.1f} m/s, braking {str(player['braking']).lower()}.",
+        f"Player: lane {player['lane']}, target {player['target_lane']}, speed {player['speed_mps']:.1f} m/s, braking {str(player['braking']).lower()}.",
+        f"Lane change in progress: {str(player['lane_change_in_progress']).lower()}; "
+        f"cooldown {player['lane_change_cooldown_s']:.1f} s; previous action: {player['previous_action']}.",
     ]
     for lane in observation["lanes"]:
         lines.append(f"{lane['lane']} LANE:")
