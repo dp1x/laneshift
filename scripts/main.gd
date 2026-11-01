@@ -92,6 +92,14 @@ var telemetry_timer: float = 0.0
 var telemetry_hz: float = 30.0
 var decision_timer: float = 0.0
 var decision_hz: float = 10.0
+var turn_based: bool = false
+var evaluation_mode: bool = false
+var turn_decision_interval: float = 1.0
+var turn_waiting: bool = false
+var turn_elapsed: float = 0.0
+var turn_wait_started_msec: int = 0
+var turn_timeout_msec: int = 25000
+var turn_decision_count: int = 0
 
 var control_mode: String = "human" # human, auto
 var external_control: bool = false
@@ -168,6 +176,7 @@ func _ready() -> void:
 	net.action_received.connect(_on_net_action)
 	net.reset_received.connect(_on_net_reset)
 	net.command_rejected.connect(_on_command_rejected)
+	net.model_error.connect(_on_model_error)
 	net.connected.connect(_on_net_connected)
 	net.disconnected.connect(_on_net_disconnected)
 	if auto_run:
@@ -189,6 +198,10 @@ func _parse_args() -> void:
 	auto_run = bool(options["auto_run"])
 	record_on_start = bool(options["record_on_start"])
 	take_control_on_start = bool(options["take_control_on_start"])
+	turn_based = bool(options["turn_based"])
+	evaluation_mode = bool(options["evaluation_mode"])
+	turn_decision_interval = float(options["turn_decision_interval"])
+	turn_timeout_msec = int(options["turn_timeout_ms"])
 	auto_seeds = options["seeds"]
 	auto_episodes_per_seed = int(options["episodes"])
 	auto_max_episodes = int(options["max_episodes"])
@@ -214,6 +227,10 @@ static func parse_options(args: PackedStringArray) -> Dictionary:
 		"auto_run": false,
 		"record_on_start": false,
 		"take_control_on_start": false,
+		"turn_based": false,
+		"evaluation_mode": false,
+		"turn_decision_interval": 1.0,
+		"turn_timeout_ms": 25000,
 		"seeds": [],
 		"episodes": 1,
 		"max_episodes": 0,
@@ -235,6 +252,19 @@ static func parse_options(args: PackedStringArray) -> Dictionary:
 			continue
 		if arg == "--record-on-start":
 			options["record_on_start"] = true
+			continue
+		if arg == "--turn-based":
+			options["turn_based"] = true
+			continue
+		if arg == "--eval-mode":
+			options["evaluation_mode"] = true
+			options["turn_based"] = true
+			continue
+		if arg.begins_with("--decision-interval="):
+			options["turn_decision_interval"] = maxf(0.1, float(arg.trim_prefix("--decision-interval=")))
+			continue
+		if arg.begins_with("--turn-timeout-ms="):
+			options["turn_timeout_ms"] = maxi(1000, int(arg.trim_prefix("--turn-timeout-ms=")))
 			continue
 		if arg == "--take-control-on-start":
 			options["take_control_on_start"] = true
@@ -1056,6 +1086,10 @@ func start_game(seed: int = -1, cfg: Dictionary = {}, requested_episode_id: Stri
 	lane_flash = 0.0
 	score_flash = 0.0
 	onboarding_timer = 8.0
+	turn_waiting = false
+	turn_elapsed = turn_decision_interval
+	turn_decision_count = 0
+	turn_wait_started_msec = 0
 	ai_history_actions.clear()
 	if ai_history != null:
 		ai_history.queue_redraw()
@@ -1189,11 +1223,26 @@ func _on_net_action(action: String, duration: float, seq: int, tick: int, episod
 			"decision_metadata": decision_metadata,
 			"reason": "" if applied else "not_legal_at_application"
 		})
+		if applied and turn_based and turn_waiting:
+			turn_waiting = false
+			turn_elapsed = 0.0
+			_log_event("turn_decision_applied", {
+				"decision_seq": turn_decision_count,
+				"action": action,
+				"label_source": label_source,
+				"physics_tick": sim.physics_tick,
+				"controller_seq": seq,
+			})
+			_show_notice("KEV: " + action)
 	else:
 		_log_event("external_action_ignored", {"controller_seq": seq, "requested_action": action, "reason": "human_control_active", "decision_metadata": decision_metadata})
 
 func _on_command_rejected(seq: int, reason: String, episode_id: String, tick: int, decision_metadata: Dictionary) -> void:
 	_log_event("external_action_rejected", {"controller_seq": seq, "reason": reason, "command_episode_id": episode_id, "command_tick": tick, "decision_metadata": decision_metadata})
+
+func _on_model_error(reason: String, episode_id: String, tick: int) -> void:
+	_log_event("model_error", {"reason": reason, "command_episode_id": episode_id, "command_tick": tick})
+	_fail_turn("model_error:" + reason)
 
 func _on_net_reset(seed: int, cfg: Dictionary, episode_id: String) -> void:
 	external_control = true
@@ -1213,6 +1262,8 @@ func _on_net_disconnected() -> void:
 		external_control = false
 		control_mode = "human"
 	_log_event("controller_disconnected", {})
+	if turn_waiting:
+		_fail_turn("controller_disconnected")
 	_update_ai_status()
 	_update_menu_status()
 
@@ -1325,6 +1376,41 @@ func _physics_process(delta: float) -> void:
 		queue_redraw()
 		return
 	if state == "playing":
+		if turn_based:
+			if turn_waiting:
+				if Time.get_ticks_msec() - turn_wait_started_msec > turn_timeout_msec:
+					_fail_turn("inference_timeout")
+				_update_hud()
+				queue_redraw()
+				return
+			if net == null or not net.connected_flag:
+				_show_notice("WAITING FOR KEV CONTROLLER...")
+				_update_hud()
+				queue_redraw()
+				return
+			if not evaluation_mode:
+				_handle_human_input(delta)
+			sim.step(delta * sim_speed_scale)
+			_log_score_milestones(sim.score)
+			if sim.status != "running":
+				_update_hud()
+				queue_redraw()
+				return
+			if recording_active:
+				telemetry_timer += delta
+				if telemetry_timer >= 1.0 / telemetry_hz:
+					telemetry_timer = 0.0
+					var turn_snap: Dictionary = sim.get_snapshot()
+					turn_snap["wall_time_unix"] = Time.get_unix_time_from_system()
+					turn_snap["wall_time_monotonic_msec"] = Time.get_ticks_msec()
+					if telemetry != null:
+						telemetry.log_telemetry(turn_snap)
+			turn_elapsed += delta * sim_speed_scale
+			if turn_elapsed >= turn_decision_interval:
+				_begin_turn_decision()
+			_update_hud()
+			queue_redraw()
+			return
 		_handle_human_input(delta)
 		if external_control and not auto_run and Time.get_ticks_msec() - last_external_action_msec > external_timeout_msec:
 			external_control = false
@@ -1356,6 +1442,42 @@ func _physics_process(delta: float) -> void:
 			net.update_state(snap2)
 			net.send_state(snap2)
 		_update_hud()
+	queue_redraw()
+
+func _begin_turn_decision() -> void:
+	if not turn_based or state != "playing" or turn_waiting:
+		return
+	turn_waiting = true
+	turn_wait_started_msec = Time.get_ticks_msec()
+	turn_decision_count += 1
+	var snapshot: Dictionary = sim.get_snapshot()
+	snapshot["wall_time_unix"] = Time.get_unix_time_from_system()
+	snapshot["wall_time_monotonic_msec"] = Time.get_ticks_msec()
+	_remember_decision_state(snapshot)
+	net.update_state(snapshot)
+	net.send_state(snapshot)
+	_log_event("turn_decision_requested", {
+		"decision_seq": turn_decision_count,
+		"physics_tick": sim.physics_tick,
+		"sim_time": sim.sim_time,
+		"legal_actions": sim.get_legal_actions(),
+	})
+	_show_notice("KEV DECIDING...")
+	queue_redraw()
+
+func _fail_turn(reason: String) -> void:
+	if not turn_waiting:
+		return
+	turn_waiting = false
+	_log_event("turn_decision_failed", {
+		"reason": reason,
+		"decision_seq": turn_decision_count,
+		"physics_tick": sim.physics_tick,
+		"sim_time": sim.sim_time,
+	})
+	_show_notice("KEV FAILED: " + reason)
+	if sim.status == "running":
+		sim.finish_episode("inference_error")
 	queue_redraw()
 
 func _handle_human_input(_delta: float) -> void:

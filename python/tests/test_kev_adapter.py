@@ -56,9 +56,11 @@ class KevAdapterTests(unittest.IsolatedAsyncioTestCase):
             "tokenizer.json",
             model_id="laneshift-ft:v1",
             label_source="fine_tuned_model",
+            prompt_mode="lane",
         )
         self.assertEqual(policy.model_id, "laneshift-ft:v1")
         self.assertEqual(policy.label_source, "fine_tuned_model")
+        self.assertEqual(policy.prompt_mode, "lane")
     async def test_builds_typed_choice_request_and_parses_actual_response_shape(self):
         captured = []
 

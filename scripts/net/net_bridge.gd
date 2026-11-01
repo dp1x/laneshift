@@ -6,6 +6,7 @@ signal disconnected()
 signal action_received(action: String, duration: float, seq: int, tick: int, episode_id: String, label_source: String, decision_metadata: Dictionary)
 signal reset_received(seed: int, config: Dictionary, episode_id: String)
 signal command_rejected(seq: int, reason: String, episode_id: String, tick: int, decision_metadata: Dictionary)
+signal model_error(reason: String, episode_id: String, tick: int)
 
 var url: String = "ws://127.0.0.1:8766"
 var enabled: bool = true
@@ -152,6 +153,8 @@ func _handle_message(text: String) -> void:
 			var ep := String(msg.get("episode_id", ""))
 			emit_signal("reset_received", seed, cfg, ep)
 			_send({"type": "ack", "protocol_version": 1, "status": "reset_accepted", "episode_id": ep})
+		"model_error":
+			emit_signal("model_error", String(msg.get("reason", "model_error")), String(msg.get("episode_id", "")), int(msg.get("tick", -1)))
 		"ping":
 			_send({"type": "pong", "protocol_version": 1})
 

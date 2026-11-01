@@ -21,7 +21,14 @@ import numpy as np
 import onnxruntime as ort
 from tokenizers import Tokenizer
 
-from kev_state import ACTION_CRITERIA, compact_kev_state
+from kev_state import (
+    ACTION_CRITERIA,
+    ACTION_CRITERIA_LANE,
+    KEV_LANE_INSTRUCTIONS,
+    compact_kev_state,
+    lane_observation,
+    render_lane_state,
+)
 from policy import PolicyDecision
 
 SPECIAL = ["<|fim_prefix|>", "<|fim_middle|>", "<|box_start|>", "<|box_end|>", "<|fim_suffix|>"]
@@ -67,6 +74,7 @@ class OnnxKevPolicy:
         arena: bool = False,
         model_id: str = "",
         label_source: str = "original_model",
+        prompt_mode: str = "compact",
     ):
         self.model_path = str(Path(model_path))
         self.tokenizer_path = str(Path(tokenizer_path))
@@ -81,6 +89,7 @@ class OnnxKevPolicy:
         self.model_id = model_id or "jaredpalmer/kev-0.8b@v1.0+onnx"
         self.model_alias = "kev-onnx"
         self.model_sha256 = ""
+        self.prompt_mode = prompt_mode if prompt_mode in {"compact", "lane"} else "compact"
         self.state_token_limit = max(8, self.length - 96)
         self.last_encoding: dict[str, Any] = {}
         self._blob = None
@@ -136,20 +145,30 @@ class OnnxKevPolicy:
         legal = [a for a in compact["legal_actions"] if a in ACTION_CRITERIA]
         if not legal:
             raise ValueError("no legal actions to offer the model")
-        state_text = _render(compact)
-        state_tokens = _user_tokens(self.tok, state_text)
-        if len(state_tokens) + 1 > self.state_token_limit:
-            state_tokens = state_tokens[: self.state_token_limit - 1]
-        state_ids = [self.tok.token_to_id(SPECIAL[0])] + state_tokens
-        ids = list(state_ids)
-        pos = list(range(len(state_ids)))
+        if self.prompt_mode == "lane":
+            state_text = render_lane_state(lane_observation(state))
+            instructions = KEV_LANE_INSTRUCTIONS
+            criteria = ACTION_CRITERIA_LANE
+        else:
+            state_text = _render(compact)
+            instructions = INSTRUCTIONS
+            criteria = ACTION_CRITERIA
         q_id = self.tok.token_to_id(SPECIAL[1])
         o_id = self.tok.token_to_id(SPECIAL[2])
         c_id = self.tok.token_to_id(SPECIAL[3])
         d_id = self.tok.token_to_id(SPECIAL[4])
-        instr = [q_id] + _user_tokens(self.tok, INSTRUCTIONS)
-        spans = [[o_id] + _user_tokens(self.tok, f"{action}: {ACTION_CRITERIA[action]}") + [c_id] for action in legal]
+        instr = [q_id] + _user_tokens(self.tok, instructions)
+        spans = [[o_id] + _user_tokens(self.tok, f"{action}: {criteria[action]}") + [c_id] for action in legal]
         branch = instr + [token for span in spans for token in span] + [d_id]
+        # Leave room for the branch and the state delimiter. The graph length is
+        # fixed; truncate only the state, never an option span.
+        max_state = max(8, self.length - len(branch))
+        state_tokens = _user_tokens(self.tok, state_text)
+        if len(state_tokens) + 1 > max_state:
+            state_tokens = state_tokens[: max_state - 1]
+        state_ids = [self.tok.token_to_id(SPECIAL[0])] + state_tokens
+        ids = list(state_ids)
+        pos = list(range(len(state_ids)))
         base = len(ids)
         ids += branch
         pos += list(range(base, base + len(branch)))
@@ -167,7 +186,13 @@ class OnnxKevPolicy:
         attention_mask = np.asarray([[1] * real + [0] * pad], dtype=np.int64)
         decide = np.asarray([decide_idx], dtype=np.int64)
         option_idx = np.asarray(ends, dtype=np.int64)
-        self.last_encoding = {"state_tokens": len(state_ids), "total_tokens": real, "legal_actions": legal}
+        self.last_encoding = {
+            "prompt_mode": self.prompt_mode,
+            "state_tokens": len(state_ids),
+            "total_tokens": real,
+            "legal_actions": legal,
+            "state_text": state_text,
+        }
         return {
             "input_ids": input_ids,
             "position_ids": position_ids,
@@ -206,6 +231,10 @@ class OnnxKevPolicy:
             confidence=probabilities[action],
             model_latency_ms=model_ms,
             client_latency_ms=(time.perf_counter() - started) * 1000.0,
-            request_payload={"state": compact_kev_state(state), "encoding": encoding},
+            request_payload={
+                "prompt_mode": self.prompt_mode,
+                "state": encoding.get("state_text", ""),
+                "encoding": encoding,
+            },
             response_payload={"probabilities": probabilities, "encoding": encoding},
         )

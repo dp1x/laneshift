@@ -112,6 +112,7 @@ def load_policy(name, model_configs=None, http_client=None, onnx_config=None, de
             arena=bool(config.get("arena", False)),
             model_id=str(config.get("model_id", "") or ""),
             label_source=str(config.get("label_source", "original_model") or "original_model"),
+            prompt_mode=str(config.get("prompt_mode", "compact") or "compact"),
         )
     config = (model_configs or {}).get(name)
     if config is None:
@@ -137,10 +138,12 @@ class ControllerServer:
         max_state_age_s=0.4,
         safety_fallback=False,
         safety_threshold=0.55,
+        evaluation_mode=False,
     ):
         self.policy_name = policy_name
         self.policy = load_policy(policy_name, model_configs, http_client, onnx_config, decisions_config)
-        self.safety_policy = RuleBasedPolicy() if safety_fallback else None
+        self.evaluation_mode = bool(evaluation_mode)
+        self.safety_policy = RuleBasedPolicy() if safety_fallback and not self.evaluation_mode else None
         self.safety_threshold = float(safety_threshold)
         self.duration = duration
         self.expected_episodes = expected_episodes
@@ -269,6 +272,19 @@ class ControllerServer:
             self.actions[action] += 1
             self.last_action_msec = time.monotonic()
 
+    async def _send_model_error(self, websocket, state, reason: str) -> None:
+        """Evaluation mode: report failure without manufacturing an action."""
+        try:
+            await websocket.send(json.dumps({
+                "type": "model_error",
+                "protocol_version": 1,
+                "reason": reason,
+                "episode_id": state.get("episode_id"),
+                "tick": state.get("physics_tick"),
+            }))
+        except websockets.ConnectionClosed:
+            return
+
     async def _decision_loop(self, websocket, state_queue: asyncio.Queue, latest_state: dict[str, Any]):
         while True:
             state = await state_queue.get()
@@ -335,6 +351,9 @@ class ControllerServer:
 
         legal_actions = state["legal_actions"]
         if decision is None:
+            if self.evaluation_mode:
+                await self._send_model_error(websocket, state, fallback_reason or "no_decision")
+                return
             fallback_action = "STAY" if "STAY" in legal_actions else legal_actions[0]
             fallback_policy = self.policy_name
             if self.safety_policy is not None and self.policy_name == "onnx_kev":
@@ -361,6 +380,9 @@ class ControllerServer:
         elif decision.action not in ALLOWED_ACTIONS or decision.action not in legal_actions:
             self.invalid_actions += 1
             fallback_reason = "action_not_legal_for_decision_state"
+            if self.evaluation_mode:
+                await self._send_model_error(websocket, state, fallback_reason)
+                return
             decision = PolicyDecision(
                 action="STAY" if "STAY" in legal_actions else legal_actions[0],
                 label_source="controller_fallback",
@@ -461,6 +483,7 @@ class ControllerServer:
             "model_id": model_id,
             "model_alias": model_alias,
             "model_sha256": getattr(self.policy, "model_sha256", ""),
+            "evaluation_mode": self.evaluation_mode,
             "decisions": self.decisions,
             "actions": dict(self.actions),
             "applied_actions": dict(self.applied_actions),
@@ -518,6 +541,7 @@ async def run_server(args):
             "arena": args.onnx_arena,
             "model_id": args.onnx_model_id,
             "label_source": args.onnx_label_source,
+            "prompt_mode": args.kev_prompt,
         }
         decisions_config = {
             "url": args.decisions_url,
@@ -537,6 +561,7 @@ async def run_server(args):
             max_state_age_s=args.max_state_age,
             safety_fallback=args.safety_fallback,
             safety_threshold=args.safety_threshold,
+            evaluation_mode=args.eval_mode,
         )
         await server.start()
         lag_task = asyncio.create_task(server._lag_monitor())
@@ -576,6 +601,8 @@ def parse_args(argv=None):
                         help="let the rule policy veto an uncertain STAY in watch mode")
     parser.add_argument("--safety-threshold", type=float, default=0.55,
                         help="minimum max probability before the safety veto applies")
+    parser.add_argument("--eval-mode", action="store_true",
+                        help="disable safety substitution; report model errors and apply only model actions")
     parser.add_argument("--max-state-age", type=float, default=0.4,
                         help="how stale a decision's state may be, in seconds of simulation time, before it is discarded")
     parser.add_argument("--expected-episodes", type=int, default=0)
@@ -604,6 +631,8 @@ def parse_args(argv=None):
     parser.add_argument("--onnx-label-source", choices=("original_model", "fine_tuned_model"),
                         default=os.getenv("LANESHIFT_ONNX_LABEL_SOURCE", "original_model"),
                         help="provenance label for decisions from this ONNX checkpoint")
+    parser.add_argument("--kev-prompt", choices=("compact", "lane"), default="compact",
+                        help="model-facing observation/prompt representation")
     parser.add_argument("--decisions-url", default=os.getenv("DECISIONS_URL", "https://openrouter.ai/api/alpha/decisions"))
     parser.add_argument("--decisions-model", default=os.getenv("DECISIONS_MODEL", "respan/span-01-lite:free"))
     parser.add_argument("--decisions-key-env", default="DECISIONS_FREE_OPENROUTER_API_KEY")

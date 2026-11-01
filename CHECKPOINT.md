@@ -16,11 +16,13 @@
 
 ## Verification
 
-- `run_tests.bat`: 38 Python tests plus Godot import, simulation, game-flow, network, telemetry, telemetry-flow and options tests pass.
+- `run_tests.bat`: 77 Python tests plus Godot import, simulation, game-flow, network, telemetry, telemetry-flow, turn-based and options tests pass.
 - `tests/telemetry_flow_test.gd` reproduces the real user path: start a run, play before Record, press Record, play, stop, then assert non-zero telemetry and events and a matching manifest.
 - Local ONNX Kev on the normal disk: 5 decisions in an 8-second episode, all accepted, `control_source=original_model`, mean model latency about 1.36 s.
 - Packaged ONNX Kev with the model on `C:\LANESHIFT2D-Kev-model`: normal ONNX Runtime path, 8 decisions in a 15-second episode, roughly 1.9 s per decision on an idle CPU. Close any other running game first; CPU contention pushed it past 8 s.
 - Watch mode with safety heartbeat: 7 of 8 seeds survived the full 15 seconds; one seed crashed at 4.5 s. Pure Kev still chose `STAY` every time; the lane changes were safety-layer actions labelled `controller_fallback`.
+- Turn-based evaluation (`PLAY-KEV-EVAL.bat`, safety disabled): the simulation froze at each decision, Kev received one state, and its exact actions were applied. The first recorded run made 3 decisions — `LEFT`, `RIGHT`, `LEFT` — all `original_model`, with no superseded states and no fallback. It crashed at 2.7 s because the third decision chose LEFT into a 1.1 s TTC gap while the centre lane was clear.
+- Controlled 8-scenario probe: the compact prompt chose STAY in all 8; the lane prompt chose LEFT in 7 of 8, including the right-safer and open-road cases. Reversing option order still chose LEFT. The lane prompt changes the bias but zero-shot Kev is not yet state-sensitive. This is a model/data problem, not an action-application bug; fine-tuning is still required.
 - Matched pilot: `rule_based` vs `onnx_kev`, same 5 seeds, 20 s, density 0.7, sim speed 1.0. See `docs/RESULTS.md` for the numbers.
 
 ## Current autonomous milestone

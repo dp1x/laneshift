@@ -137,6 +137,11 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(socket.messages[0]["label_source"], "controller_fallback")
         self.assertEqual(server.invalid_actions, 1)
 
+    def test_evaluation_mode_disables_safety_substitution(self):
+        server = ControllerServer("rule_based", safety_fallback=True, evaluation_mode=True)
+        self.assertIsNone(server.safety_policy)
+        self.assertTrue(server.evaluation_mode)
+
     def test_watch_safety_vetoes_an_uncertain_stay_when_a_lane_is_clear(self):
         server = ControllerServer("rule_based", decision_timeout=0.2, safety_fallback=True)
         server.policy_name = "onnx_kev"

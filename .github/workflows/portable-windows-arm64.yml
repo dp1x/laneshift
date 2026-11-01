@@ -64,6 +64,7 @@ jobs:
             "res://tests/network_test.gd",
             "res://tests/telemetry_test.gd",
             "res://tests/telemetry_flow_test.gd",
+            "res://tests/turn_based_test.gd",
             "res://tests/options_test.gd"
           )
           foreach ($test in $tests) {

@@ -3,16 +3,22 @@ param(
     [string]$Tokenizer = $env:LANESHIFT_ONNX_TOKENIZER,
     [int]$Port = 8766,
     [int]$Length = 256,
-    [int]$Threads = 4,
+    [int]$Threads = 8,
     [string]$Godot = "godot",
     [string]$ModelId = "",
     [ValidateSet("original_model", "fine_tuned_model")]
     [string]$LabelSource = "original_model",
+    [ValidateSet("compact", "lane")]
+    [string]$PromptMode = "lane",
+    [string]$Seeds = "1,2,3,4,5,6,7,8",
     [int]$Episodes = 999,
     [double]$EpisodeDuration = 0,
+    [double]$DecisionInterval = 1.0,
+    [int]$TurnTimeoutMs = 25000,
     [switch]$Windowed,
     [switch]$Headless,
-    [switch]$NoSafety
+    [switch]$NoSafety,
+    [switch]$Evaluation
 )
 
 $ErrorActionPreference = "Stop"
@@ -77,10 +83,13 @@ $controllerArgs = @(
     "--onnx-threads", "$Threads",
     "--onnx-model-id", $ModelId,
     "--onnx-label-source", $LabelSource,
-    "--decision-timeout", "10.0",
-    "--max-state-age", "10.0"
+    "--kev-prompt", $PromptMode,
+    "--decision-timeout", $(if ($Evaluation) { "20.0" } else { "10.0" }),
+    "--max-state-age", $(if ($Evaluation) { "60.0" } else { "10.0" })
 )
-if (-not $NoSafety) {
+if ($Evaluation) {
+    $controllerArgs += "--eval-mode"
+} elseif (-not $NoSafety) {
     $controllerArgs += "--safety-fallback"
 }
 
@@ -121,16 +130,24 @@ try {
 
     $gameArgs = @(
         "--auto-run",
-        "--seeds=1,2,3,4,5,6,7,8",
+        "--seeds=$Seeds",
         "--episodes=$Episodes",
         "--episode-duration=$EpisodeDuration",
         "--ws-port=$Port",
         "--traffic-density=0.7",
         "--sim-speed-scale=1.0",
         "--max-fps=30",
-        "--external-timeout-ms=12000",
+        "--external-timeout-ms=$(if ($Evaluation) { 60000 } else { 12000 })",
         "--max-stale-ticks=6000"
     )
+    if ($Evaluation) {
+        $gameArgs += @(
+            "--turn-based",
+            "--eval-mode",
+            "--decision-interval=$DecisionInterval",
+            "--turn-timeout-ms=$TurnTimeoutMs"
+        )
+    }
     if ($Windowed) { $gameArgs += "--windowed" }
 
     if ($packaged) {

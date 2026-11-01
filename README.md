@@ -79,6 +79,21 @@ PLAY-KEV.bat -Episodes 10 -EpisodeDuration 20
 
 The controller starts on port `8766`, waits for the model to load, then launches the game in auto-run with Kev in control. The bottom-right instrument shows the model alias, the chosen action, the probability and the inference latency. The player has a cyan ring while the external controller has control. Close the game window to stop both processes.
 
+## Turn-based Kev evaluation
+
+`PLAY-KEV-EVAL.bat` starts a separate evaluation session. In this mode:
+
+- the simulation pauses at each decision point and does not advance while Kev thinks;
+- exactly one observation is sent per decision;
+- the safety heartbeat and STAY veto are disabled;
+- Kev's action is applied directly, with `label_source=original_model`;
+- an inference timeout or invalid action is recorded as a model error and the episode aborts;
+- no rule action silently replaces the model.
+
+This mode is intentionally slower. A 1–4 s decision is acceptable because the
+world waits. Use it to judge the model, not to play the normal safety-enabled
+game.
+
 The packaged build contains the game, controller and Python runtime. The model lives on the normal `C:` disk:
 
 ```text
@@ -370,6 +385,7 @@ The released checkpoint is slower than the decision cadence and does not avoid t
 project.godot            Godot project settings
 kev_models.example.json  Template registry of model policies
 PLAY-KEV.bat             One-click local ONNX Kev run
+PLAY-KEV-EVAL.bat        Turn-based, safety-disabled Kev evaluation
 scripts/play_kev.ps1     Starts the ONNX controller and the game together
 scenes/main.tscn         Main scene; the world is built procedurally at runtime
 scripts/main.gd          Pseudo-perspective rendering, HUD, input, episode flow, recording

@@ -21,6 +21,144 @@ ACTION_CRITERIA = {
     "BRAKE": "Reduce speed using the brake.",
 }
 
+LANE_NAMES = ("LEFT", "CENTER", "RIGHT")
+
+KEV_LANE_INSTRUCTIONS = (
+    "Choose the safest legal next action. Avoid collisions first. "
+    "Check both front and rear traffic in the destination lane before changing "
+    "lanes. Do not enter a lane only because its front is clear. Choose STAY "
+    "only when the current lane is acceptably safe; do not choose STAY merely "
+    "because it is the default. Choose BRAKE when slowing is safer than the "
+    "available lane changes. Select exactly one option from the legal choices."
+)
+
+ACTION_CRITERIA_LANE = {
+    "LEFT": "Move one lane left only if the left lane has safe front and rear clearance.",
+    "STAY": "Remain in the current lane only if the current lane is acceptably safe.",
+    "RIGHT": "Move one lane right only if the right lane has safe front and rear clearance.",
+    "BRAKE": "Reduce speed without changing lanes when slowing is safer than a lane change.",
+}
+
+
+def _movement(gap: float, relative_speed: float) -> tuple[str, float | None]:
+    """Describe relative motion using the simulation's sign convention.
+
+    relative_distance_z = vehicle.z - player.z: positive is ahead.
+    relative_speed_z = player.speed - vehicle.speed: positive means the player
+    is closing an ahead vehicle, and negative means a behind vehicle is
+    approaching the player.
+    """
+    if gap > 0:
+        if relative_speed > 0.01:
+            return "closing", round(gap / relative_speed, 2)
+        if relative_speed < -0.01:
+            return "opening", None
+        return "same speed", None
+    if relative_speed < -0.01:
+        return "approaching from behind", round(abs(gap) / abs(relative_speed), 2)
+    if relative_speed > 0.01:
+        return "falling behind", None
+    return "same speed", None
+
+
+def lane_observation(state: dict[str, Any]) -> dict[str, Any]:
+    """A lane-oriented observation for a typed driving decision.
+
+    Unlike compact_kev_state, this keeps the nearest front and rear vehicle in
+    every lane, so a vehicle behind in a target lane cannot be discarded by a
+    global nearest-three cap.
+    """
+    player = state.get("player")
+    traffic = state.get("traffic")
+    legal_actions = state.get("legal_actions")
+    if not isinstance(player, dict) or not isinstance(traffic, list):
+        raise ValueError("decision state is missing structured player or traffic data")
+    if (
+        not isinstance(legal_actions, list)
+        or not legal_actions
+        or "STAY" not in legal_actions
+        or any(not isinstance(action, str) or action not in ACTION_CRITERIA for action in legal_actions)
+        or len(set(legal_actions)) != len(legal_actions)
+    ):
+        raise ValueError("decision state has no valid authoritative legal_actions set")
+
+    lanes = []
+    for lane in range(3):
+        ahead = None
+        behind = None
+        for vehicle in traffic:
+            if not isinstance(vehicle, dict) or vehicle.get("lane") != lane:
+                continue
+            gap = vehicle.get("relative_distance_z")
+            if not isinstance(gap, (int, float)) or isinstance(gap, bool):
+                continue
+            gap = float(gap)
+            if gap > 0 and (ahead is None or gap < ahead[0]):
+                ahead = (gap, vehicle)
+            elif gap < 0 and (behind is None or gap > behind[0]):
+                behind = (gap, vehicle)
+
+        def describe(entry):
+            if entry is None:
+                return None
+            gap, vehicle = entry
+            relative_speed = vehicle.get("relative_speed_z")
+            relative_speed = float(relative_speed) if isinstance(relative_speed, (int, float)) and not isinstance(relative_speed, bool) else 0.0
+            movement, ttc = _movement(gap, relative_speed)
+            return {
+                "distance_m": round(abs(gap), 2),
+                "relative_speed_mps": round(relative_speed, 2),
+                "movement": movement,
+                "time_to_contact_s": ttc,
+            }
+
+        lanes.append({
+            "lane": LANE_NAMES[lane],
+            "ahead": describe(ahead),
+            "behind": describe(behind),
+        })
+
+    return {
+        "player": {
+            "lane": LANE_NAMES[int(player.get("lane", 1))] if player.get("lane") in (0, 1, 2) else "UNKNOWN",
+            "speed_mps": round(float(player.get("speed", 0.0)), 2),
+            "braking": bool(player.get("braking", False)),
+        },
+        "lanes": lanes,
+        "legal_actions": list(legal_actions),
+    }
+
+
+def render_lane_state(observation: dict[str, Any]) -> str:
+    """Render lane_observation as a compact natural-language decision document."""
+    player = observation["player"]
+    lines = [
+        "LANESHIFT DECISION STATE",
+        f"Player: lane {player['lane']}, speed {player['speed_mps']:.1f} m/s, braking {str(player['braking']).lower()}.",
+    ]
+    for lane in observation["lanes"]:
+        lines.append(f"{lane['lane']} LANE:")
+        ahead = lane.get("ahead")
+        behind = lane.get("behind")
+        if ahead:
+            ttc = f", time to contact {ahead['time_to_contact_s']:.1f} s" if ahead.get("time_to_contact_s") is not None else ""
+            lines.append(
+                f"  Nearest vehicle ahead: {ahead['distance_m']:.1f} m, {ahead['movement']} "
+                f"(relative speed {ahead['relative_speed_mps']:+.1f} m/s){ttc}."
+            )
+        else:
+            lines.append("  No vehicle ahead within observation range.")
+        if behind:
+            ttc = f", time to contact {behind['time_to_contact_s']:.1f} s" if behind.get("time_to_contact_s") is not None else ""
+            lines.append(
+                f"  Nearest vehicle behind: {behind['distance_m']:.1f} m, {behind['movement']} "
+                f"(relative speed {behind['relative_speed_mps']:+.1f} m/s){ttc}."
+            )
+        else:
+            lines.append("  No vehicle behind within observation range.")
+    lines.append("Legal actions: " + ", ".join(observation["legal_actions"]) + ".")
+    return "\n".join(lines)
+
 
 def _round(value: Any, digits: int = 2) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
