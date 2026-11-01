@@ -1,0 +1,204 @@
+{
+  "schema_version": 1,
+  "created_at_utc": "2026-11-01T11:09:31.913230+00:00",
+  "source": "LaneShift simulation recordings joined by python/export_decisions.py",
+  "code_commit": {
+    "commit": "630a9f93544ea03f1e91003ef6bf579294c8bfc0",
+    "dirty": true
+  },
+  "conditions": {
+    "policy": "rule_based",
+    "label_sources": [
+      "rule_based"
+    ],
+    "decision_cadence_hz": 10,
+    "telemetry_cadence_hz": 30,
+    "episode_duration_s": 30.0,
+    "traffic_density": 1.5,
+    "sim_speed_scale": 2.0
+  },
+  "counts": {
+    "rows": 1348,
+    "episodes": 15,
+    "scenario_seeds": 15,
+    "sessions": 1,
+    "rows_without_episode_summary": 0
+  },
+  "episode_outcomes": {
+    "termination_reasons": {
+      "crash": 8,
+      "timeout": 7
+    },
+    "mean_score": 356.6789,
+    "mean_survival_time": 21.1222,
+    "episodes_with_collision": 8
+  },
+  "action_counts": {
+    "STAY": 1192,
+    "RIGHT": 21,
+    "BRAKE": 111,
+    "LEFT": 24
+  },
+  "label_source_counts": {
+    "rule_based": 1348
+  },
+  "probabilities_present": 0,
+  "rejected_decisions": 0,
+  "incomplete_decisions": 0,
+  "malformed_records": 0,
+  "sessions": [
+    {
+      "session_id": "session_20261101_144044_173",
+      "path": ".portable-dev\\recordings\\session_20261101_144044_173",
+      "telemetry_records": 4756,
+      "event_records": 4281,
+      "episode_records": 15,
+      "candidates": 1348,
+      "rows": 1348,
+      "rejected_actions": 0,
+      "malformed_lines": 0
+    }
+  ],
+  "split_policy": "whole scenario-seed groups; an episode and every adjacent decision stay in one split",
+  "split_seed": 7,
+  "validation_fraction": 0.2,
+  "test_fraction": 0.2,
+  "splits": {
+    "train": {
+      "rows": 764,
+      "episodes": 9,
+      "scenario_seeds": [
+        11,
+        19,
+        23,
+        31,
+        37,
+        43,
+        47,
+        53,
+        67
+      ],
+      "action_counts": {
+        "STAY": 696,
+        "LEFT": 15,
+        "BRAKE": 41,
+        "RIGHT": 12
+      }
+    },
+    "validation": {
+      "rows": 238,
+      "episodes": 3,
+      "scenario_seeds": [
+        3,
+        41,
+        59
+      ],
+      "action_counts": {
+        "STAY": 201,
+        "RIGHT": 3,
+        "BRAKE": 31,
+        "LEFT": 3
+      }
+    },
+    "test": {
+      "rows": 346,
+      "episodes": 3,
+      "scenario_seeds": [
+        7,
+        29,
+        61
+      ],
+      "action_counts": {
+        "STAY": 295,
+        "RIGHT": 6,
+        "BRAKE": 39,
+        "LEFT": 6
+      }
+    }
+  },
+  "feature_names": [
+    "player_lane_0",
+    "player_lane_1",
+    "player_lane_2",
+    "target_lane_delta",
+    "lane_change_in_progress",
+    "lane_change_cooldown",
+    "player_speed_scaled",
+    "legal_LEFT",
+    "legal_STAY",
+    "legal_RIGHT",
+    "legal_BRAKE",
+    "v1_present",
+    "v1_lane",
+    "v1_distance",
+    "v1_rel_speed",
+    "v1_ttc",
+    "v1_in_player_lane",
+    "v2_present",
+    "v2_lane",
+    "v2_distance",
+    "v2_rel_speed",
+    "v2_ttc",
+    "v2_in_player_lane",
+    "v3_present",
+    "v3_lane",
+    "v3_distance",
+    "v3_rel_speed",
+    "v3_ttc",
+    "v3_in_player_lane",
+    "nearest_same_lane_gap",
+    "nearest_left_gap",
+    "nearest_right_gap",
+    "min_ttc"
+  ],
+  "feature_sources": [
+    "player_lane",
+    "player_target_lane",
+    "lane_change_in_progress",
+    "lane_change_cooldown",
+    "player_speed",
+    "legal_actions",
+    "nearest_same_lane_gap",
+    "nearest_left_gap",
+    "nearest_right_gap",
+    "min_ttc",
+    "v1_present",
+    "v1_lane",
+    "v1_distance",
+    "v1_rel_speed",
+    "v1_ttc",
+    "v1_in_player_lane",
+    "v2_present",
+    "v2_lane",
+    "v2_distance",
+    "v2_rel_speed",
+    "v2_ttc",
+    "v2_in_player_lane",
+    "v3_present",
+    "v3_lane",
+    "v3_distance",
+    "v3_rel_speed",
+    "v3_ttc",
+    "v3_in_player_lane"
+  ],
+  "outcome_columns_excluded_from_features": [
+    "episode_score",
+    "episode_distance",
+    "episode_survival_time",
+    "episode_collisions",
+    "episode_overtaken",
+    "episode_termination",
+    "episode_success"
+  ],
+  "limits": [
+    "Labels are the deterministic rule_based policy's actions, not human driving decisions.",
+    "A model trained on this export can imitate the rule policy; it is not evidence of safer driving.",
+    "rule_based decisions carry no action probabilities, so probability columns are null.",
+    "Consecutive rows are 0.1 s apart and highly correlated; row counts overstate effective sample size.",
+    "All state is simulated ground truth: there is no phone capture, perception pipeline or human play.",
+    "Rows are produced from one headless session per runner invocation; split groups are scenario seeds.",
+    "Episode outcome columns are for evaluation only and must never enter the model input."
+  ],
+  "decisions_file": ".portable-dev\\pilot\\decisions.jsonl",
+  "decisions_sha256": "a4ff7096590b1e59ac635f086b546bf733eb9689d581517f51acce79d6903ce1"
+}
