@@ -9,8 +9,12 @@ human.
 - The simulation testbed, telemetry, controller, local Kev inference, packaged
   watch mode and matched pilot harness work.
 - The current gate is a real decision dataset and a baseline model.
-- An isolated worktree `C:\Users\Dhane\dev\cris@ds-training` on branch
-  `training/pilot` is building that pilot.
+- The decision dataset and baseline pilot is merged in
+  [`TRAINING-PILOT.md`](TRAINING-PILOT.md). It used rule-based labels: 1,348
+  decision rows over 15 seeds; the held-out MLP reached 0.8844 accuracy,
+  0.4426 macro-F1, 0.3587 log loss, 0.1763 Brier and 0.0671 ECE. The balanced
+  variant reached 0.8728 accuracy and 0.5574 macro-F1. These are imitation
+  metrics, not driving results.
 - The released Kev checkpoint is slow and uncertain. On `C:` it is about
   1.4-2.0 s per decision; pure Kev still chooses `STAY` at roughly 38-41%.
   The watch-mode safety layer is what keeps the car alive.

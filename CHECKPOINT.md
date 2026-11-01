@@ -25,9 +25,10 @@
 
 ## Current autonomous milestone
 
-- Worktree: `C:\Users\Dhane\dev\cris@ds-training`, branch `training/pilot`.
-- Goal: decision-level dataset export and a small supervised baseline with held-out seed metrics.
-- Human gate: data source, approved labels, fine-tune target, GPU budget and the final evaluation claim. See `docs/NEXT-GATE.md`.
+- Decision-level dataset export and a small supervised baseline are merged on the feature branch.
+- Pilot: 1,348 decision rows over 15 rule-based seeds; held-out MLP 0.8844 accuracy, 0.4426 macro-F1, 0.3587 log loss, 0.1763 Brier, 0.0671 ECE. Balanced variant: 0.8728 accuracy, 0.5574 macro-F1.
+- The labels are rule-based; the MLP has not driven the car and no fine-tuning has happened.
+- Human gate: data source, approved labels, fine-tune target, GPU budget and the final evaluation claim. See `docs/NEXT-GATE.md` and `docs/TRAINING-PILOT.md`.
 
 ## Remaining work
 
