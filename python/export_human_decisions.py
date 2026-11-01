@@ -18,10 +18,15 @@ from typing import Any
 from kev_state import (
     ACTION_CRITERIA,
     ACTION_CRITERIA_LANE,
+    ACTION_CRITERIA_SCENE,
     KEV_LANE_INSTRUCTIONS,
+    KEV_SCENE_INSTRUCTIONS,
+    OBSERVATION_SCHEMA_VERSION,
     compact_kev_state,
     lane_observation,
     render_lane_state,
+    render_scene_state,
+    scene_observation,
 )
 
 
@@ -52,16 +57,24 @@ def _seed_from_state(state: dict[str, Any]) -> int | None:
 
 
 def _kev_state(state: dict[str, Any], prompt_mode: str) -> str:
+    if prompt_mode == "scene":
+        return render_scene_state(scene_observation(state))
     if prompt_mode == "lane":
         return render_lane_state(lane_observation(state))
     return json.dumps(compact_kev_state(state), indent=2, sort_keys=True)
 
 
 def _criteria(prompt_mode: str) -> dict[str, str]:
-    return ACTION_CRITERIA_LANE if prompt_mode == "lane" else ACTION_CRITERIA
+    if prompt_mode == "scene":
+        return ACTION_CRITERIA_SCENE
+    if prompt_mode == "lane":
+        return ACTION_CRITERIA_LANE
+    return ACTION_CRITERIA
 
 
 def _instructions(prompt_mode: str) -> str:
+    if prompt_mode == "scene":
+        return KEV_SCENE_INSTRUCTIONS
     if prompt_mode == "lane":
         return KEV_LANE_INSTRUCTIONS
     return "Choose the safest useful next action from the currently legal choices."
@@ -91,7 +104,7 @@ def _split_groups(groups: list[str]) -> dict[str, str]:
     return split
 
 
-def export(recordings: Path, output: Path, prompt_mode: str, session_filter: set[str] | None) -> dict[str, Any]:
+def export(recordings: Path, output: Path, prompt_mode: str, session_filter: set[str] | None, allow_legacy: bool = False) -> dict[str, Any]:
     output.mkdir(parents=True, exist_ok=True)
     raw: list[dict[str, Any]] = []
     cards: list[dict[str, Any]] = []
@@ -99,6 +112,8 @@ def export(recordings: Path, output: Path, prompt_mode: str, session_filter: set
     malformed = 0
     duplicates = 0
     illegal = 0
+    legacy_schema = 0
+    schema_versions = Counter()
     sessions = 0
     episodes: set[tuple[str, str]] = set()
     seen_event_ids: set[str] = set()
@@ -152,6 +167,31 @@ def export(recordings: Path, output: Path, prompt_mode: str, session_filter: set
             is_legal = action in legal
             if not is_legal:
                 illegal += 1
+            human_adjudicated = event.get("human_adjudicated_action")
+            schema_version = int(state.get("observation_schema", 1) or 1)
+            schema_versions[str(schema_version)] += 1
+            if schema_version != OBSERVATION_SCHEMA_VERSION and not allow_legacy:
+                legacy_schema += 1
+                # Preserve the raw record, but do not mix old information into
+                # training rows with the new observation schema.
+                raw.append({
+                    "session_id": session_dir.name,
+                    "episode_id": episode_id,
+                    "scenario_seed": seed,
+                    "decision_seq": decision_seq,
+                    "physics_tick": event.get("physics_tick"),
+                    "sim_time": event.get("decision_sim_time"),
+                    "human_action": action,
+                    "human_adjudicated_action": human_adjudicated,
+                    "accepted": True,
+                    "legal_action": is_legal,
+                    "recent_actions": event.get("recent_actions", []),
+                    "state_before": state,
+                    "episode_outcome": episode_outcomes.get(episode_id),
+                    "raw_event": event,
+                    "schema_version": schema_version,
+                })
+                continue
             episodes.add((session_dir.name, episode_id))
             human_adjudicated = event.get("human_adjudicated_action")
             if human_adjudicated is not None and human_adjudicated != action:
@@ -173,6 +213,7 @@ def export(recordings: Path, output: Path, prompt_mode: str, session_filter: set
                 "state_before": state,
                 "episode_outcome": episode_outcomes.get(episode_id),
                 "raw_event": event,
+                "schema_version": schema_version,
             }
             raw.append(raw_record)
             group_key = f"seed:{seed}"
@@ -210,6 +251,7 @@ def export(recordings: Path, output: Path, prompt_mode: str, session_filter: set
                 "legal_action": row["legal_action"],
                 "episode_outcome": row["episode_outcome"],
                 "prompt_mode": prompt_mode,
+                "observation_schema": OBSERVATION_SCHEMA_VERSION,
             })
 
     raw_path = output / "raw_human.jsonl"
@@ -229,6 +271,7 @@ def export(recordings: Path, output: Path, prompt_mode: str, session_filter: set
     seed_count = len(group_rows)
     card = {
         "schema_version": 1,
+        "observation_schema": OBSERVATION_SCHEMA_VERSION,
         "source": "human action_decision events with accepted=true and label_source=human",
         "prompt_mode": prompt_mode,
         "sessions": sessions,
@@ -240,6 +283,8 @@ def export(recordings: Path, output: Path, prompt_mode: str, session_filter: set
         "malformed": malformed,
         "duplicates": duplicates,
         "illegal_human_actions": illegal,
+        "schema_versions": dict(schema_versions),
+        "legacy_schema_excluded": legacy_schema,
         "splits": split_counts,
         "raw_file": str(raw_path),
         "raw_sha256": hashlib.sha256(raw_path.read_bytes()).hexdigest(),
@@ -263,6 +308,9 @@ def export(recordings: Path, output: Path, prompt_mode: str, session_filter: set
         f"- malformed: {malformed}",
         f"- duplicates: {duplicates}",
         f"- illegal human actions: {illegal}",
+        f"- observation schema required for training: {OBSERVATION_SCHEMA_VERSION}",
+        f"- schema versions: {dict(schema_versions)}",
+        f"- legacy schema excluded from training: {legacy_schema}",
         f"- splits: {split_counts}",
         f"- raw file: `{raw_path}`",
         "",
@@ -278,10 +326,12 @@ def main() -> None:
     parser.add_argument("--recordings", type=Path, default=Path("recordings"))
     parser.add_argument("--output", type=Path, default=Path("human-data"))
     parser.add_argument("--session", action="append", default=[])
-    parser.add_argument("--prompt-mode", choices=("compact", "lane"), default="lane")
+    parser.add_argument("--prompt-mode", choices=("compact", "lane", "scene"), default="scene")
+    parser.add_argument("--allow-legacy", action="store_true",
+                        help="include schema-v1 states in training rows; not recommended")
     args = parser.parse_args()
     session_filter = set(args.session) if args.session else None
-    card = export(args.recordings, args.output, args.prompt_mode, session_filter)
+    card = export(args.recordings, args.output, args.prompt_mode, session_filter, args.allow_legacy)
     print(json.dumps(card, indent=2, sort_keys=True))
 
 

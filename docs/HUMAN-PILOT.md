@@ -36,6 +36,9 @@ snapshots are valid.
 - The package executable used for this pilot predates the `human_action` and
   `recent_actions` event fields. The exporter used the accepted
   `requested_action` as the legacy human action. Future builds record both.
+- This session is observation schema 1. Its raw records are preserved, but v2
+  training export excludes it; a v2 human session must be recorded with a
+  current build before it can join the v2 dataset.
 
 Do not treat 17 lane-change decisions as sufficient training data. This is a
 schema and workflow pilot.

@@ -47,7 +47,7 @@ cd python
 python export_human_decisions.py `
   --recordings "..\recordings" `
   --output "..\human-data" `
-  --prompt-mode lane
+  --prompt-mode scene
 ```
 
 For a specific pilot session:
@@ -69,9 +69,14 @@ Outputs:
 | `human-data.card.json` | Counts, hashes, split membership and limits |
 | `human-data.report.md` | Human-readable quality report |
 
-The exporter uses the same lane observation and prompt as inference
-(`prompt_mode=lane`). It can also export the compact baseline with
-`--prompt-mode compact`.
+The exporter uses the same schema-2 scene observation and prompt as inference
+(`prompt_mode=scene`). It can also export the compact baseline with
+`--prompt-mode compact` or the older lane summary with `--prompt-mode lane`.
+
+Only `state_before` snapshots with `observation_schema: 2` become training
+rows. Schema-1 records are written to `raw_human.jsonl` unchanged and counted
+in `legacy_schema_excluded`; they are not mixed into v2 training. Passing
+`--allow-legacy` is an explicit override and is not recommended.
 
 ## Splits
 

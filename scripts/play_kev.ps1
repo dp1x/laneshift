@@ -8,8 +8,8 @@ param(
     [string]$ModelId = "",
     [ValidateSet("original_model", "fine_tuned_model")]
     [string]$LabelSource = "original_model",
-    [ValidateSet("compact", "lane")]
-    [string]$PromptMode = "lane",
+    [ValidateSet("compact", "lane", "scene")]
+    [string]$PromptMode = "scene",
     [string]$Seeds = "1,2,3,4,5,6,7,8",
     [int]$Episodes = 999,
     [double]$EpisodeDuration = 0,

@@ -19,6 +19,7 @@ def event(seed, session_suffix, action, episode, seq):
         "traffic": [{"id": "v1", "lane": 1, "relative_distance_z": 20.0,
                      "relative_speed_z": 3.0}],
         "legal_actions": ["LEFT", "STAY", "RIGHT", "BRAKE"],
+        "observation_schema": 2,
         "score": 99,
         "distance": 200,
     }

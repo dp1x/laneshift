@@ -24,10 +24,14 @@ from tokenizers import Tokenizer
 from kev_state import (
     ACTION_CRITERIA,
     ACTION_CRITERIA_LANE,
+    ACTION_CRITERIA_SCENE,
     KEV_LANE_INSTRUCTIONS,
+    KEV_SCENE_INSTRUCTIONS,
     compact_kev_state,
     lane_observation,
     render_lane_state,
+    render_scene_state,
+    scene_observation,
 )
 from policy import PolicyDecision
 
@@ -89,7 +93,7 @@ class OnnxKevPolicy:
         self.model_id = model_id or "jaredpalmer/kev-0.8b@v1.0+onnx"
         self.model_alias = "kev-onnx"
         self.model_sha256 = ""
-        self.prompt_mode = prompt_mode if prompt_mode in {"compact", "lane"} else "compact"
+        self.prompt_mode = prompt_mode if prompt_mode in {"compact", "lane", "scene"} else "compact"
         self.state_token_limit = max(8, self.length - 96)
         self.last_encoding: dict[str, Any] = {}
         self._blob = None
@@ -145,7 +149,11 @@ class OnnxKevPolicy:
         legal = [a for a in compact["legal_actions"] if a in ACTION_CRITERIA]
         if not legal:
             raise ValueError("no legal actions to offer the model")
-        if self.prompt_mode == "lane":
+        if self.prompt_mode == "scene":
+            state_text = render_scene_state(scene_observation(state))
+            instructions = KEV_SCENE_INSTRUCTIONS
+            criteria = ACTION_CRITERIA_SCENE
+        elif self.prompt_mode == "lane":
             state_text = render_lane_state(lane_observation(state))
             instructions = KEV_LANE_INSTRUCTIONS
             criteria = ACTION_CRITERIA_LANE
@@ -165,6 +173,11 @@ class OnnxKevPolicy:
         max_state = max(8, self.length - len(branch))
         state_tokens = _user_tokens(self.tok, state_text)
         if len(state_tokens) + 1 > max_state:
+            if self.prompt_mode == "scene":
+                raise ValueError(
+                    f"scene observation needs {len(state_tokens) + 1} state tokens; "
+                    f"only {max_state} fit without dropping vehicles"
+                )
             state_tokens = state_tokens[: max_state - 1]
         state_ids = [self.tok.token_to_id(SPECIAL[0])] + state_tokens
         ids = list(state_ids)

@@ -631,7 +631,7 @@ def parse_args(argv=None):
     parser.add_argument("--onnx-label-source", choices=("original_model", "fine_tuned_model"),
                         default=os.getenv("LANESHIFT_ONNX_LABEL_SOURCE", "original_model"),
                         help="provenance label for decisions from this ONNX checkpoint")
-    parser.add_argument("--kev-prompt", choices=("compact", "lane"), default="compact",
+    parser.add_argument("--kev-prompt", choices=("compact", "lane", "scene"), default="compact",
                         help="model-facing observation/prompt representation")
     parser.add_argument("--decisions-url", default=os.getenv("DECISIONS_URL", "https://openrouter.ai/api/alpha/decisions"))
     parser.add_argument("--decisions-model", default=os.getenv("DECISIONS_MODEL", "respan/span-01-lite:free"))

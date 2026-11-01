@@ -16,7 +16,8 @@
 
 ## Verification
 
-- `run_tests.bat`: 77 Python tests plus Godot import, simulation, game-flow, network, telemetry, telemetry-flow, turn-based and options tests pass.
+- `run_tests.bat`: 90 Python tests plus Godot import, simulation, game-flow, network, telemetry, telemetry-flow, turn-based, observation, human-schema and options tests pass.
+- Observation audit (schema 2): every rendered vehicle is included, off-screen traffic is separately labelled within `[-15, 160]` m, collision dimensions and previous actions are in the snapshot, and the scene prompt is 86-120 tokens versus 174-199 for the truncated lane prompt. See `docs/OBSERVATION-AUDIT.md`.
 - `tests/telemetry_flow_test.gd` reproduces the real user path: start a run, play before Record, press Record, play, stop, then assert non-zero telemetry and events and a matching manifest.
 - Local ONNX Kev on the normal disk: 5 decisions in an 8-second episode, all accepted, `control_source=original_model`, mean model latency about 1.36 s.
 - Packaged ONNX Kev with the model on `C:\LANESHIFT2D-Kev-model`: normal ONNX Runtime path, 8 decisions in a 15-second episode, roughly 1.9 s per decision on an idle CPU. Close any other running game first; CPU contention pushed it past 8 s.

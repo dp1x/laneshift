@@ -40,6 +40,14 @@ Current LANESHIFT prompt:
 - 10 Hz controller, 2–4 s inference, stale state
 - rule-based safety heartbeat drives; Kev chooses `STAY` at ~0.38–0.41
 
+**Update 2026-11-01:** the prompt research below predates observation schema
+2. The current scene prompt sends every rendered vehicle, a separate relevant
+off-screen list, signed closing speeds, absolute speeds and player manoeuvre
+state, and no longer truncates at the graph limit. See
+[`OBSERVATION-AUDIT.md`](OBSERVATION-AUDIT.md). The model-quality conclusions
+in this brief still stand: zero-shot Kev is not state-sensitive, and
+fine-tuning is the next step.
+
 ## Working conclusion
 
 The prompt is a major, testable cause. The model is being asked a policy/control

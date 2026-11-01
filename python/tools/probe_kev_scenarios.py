@@ -74,6 +74,7 @@ async def main() -> None:
     policies = {
         "compact": OnnxKevPolicy(str(model), str(tokenizer), length=256, intra_threads=8, prompt_mode="compact"),
         "lane": OnnxKevPolicy(str(model), str(tokenizer), length=256, intra_threads=8, prompt_mode="lane"),
+        "scene": OnnxKevPolicy(str(model), str(tokenizer), length=256, intra_threads=8, prompt_mode="scene"),
     }
     for name, policy in policies.items():
         await policy.start()
@@ -86,8 +87,12 @@ async def main() -> None:
                 "expected_safe_action": expected,
                 "chosen": decision.action,
                 "probabilities": probs,
+                "state_tokens": decision.response_payload["encoding"]["state_tokens"],
                 "latency_ms": round(decision.model_latency_ms, 1),
             }), flush=True)
+        policy.session = None
+        policy.tok = None
+        policy._blob = None
 
 
 if __name__ == "__main__":

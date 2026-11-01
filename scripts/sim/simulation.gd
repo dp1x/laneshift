@@ -284,11 +284,22 @@ func get_snapshot() -> Dictionary:
 			"id": v["id"],
 			"lane": v["lane"],
 			"type": v["type"],
+			"length": v["length"],
+			"width": v["width"],
 			"position": {"x": LANE_CENTERS[v["lane"]], "y": 0.0, "z": v["z"]},
 			"velocity": {"x": 0.0, "y": 0.0, "z": v["speed"]},
+			"speed": v["speed"],
+			# Traffic keeps a constant speed in this simulation; it has no
+			# throttle or brake controller.
+			"acceleration": 0.0,
 			"relative_distance_z": gap,
 			"relative_speed_z": player_speed - float(v["speed"])
 		})
+	var player_acceleration := 0.0
+	if braking and player_speed > base_speed * 0.45:
+		player_acceleration = -14.0
+	elif not braking and player_speed < max_speed:
+		player_acceleration = 3.0
 	return {
 		"protocol_version": 1,
 		"episode_id": episode_id,
@@ -303,6 +314,9 @@ func get_snapshot() -> Dictionary:
 			"lane_change_in_progress": lane_change_in_progress,
 			"lane_change_cooldown": lane_change_cooldown,
 			"speed": player_speed,
+			"base_speed": base_speed,
+			"max_speed": max_speed,
+			"acceleration": player_acceleration,
 			"velocity": {"x": player_velocity_x, "y": 0.0, "z": player_speed},
 			"current_action": current_action,
 			"braking": braking

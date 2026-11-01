@@ -70,7 +70,7 @@ The local path uses the exported ONNX graph, so no Kev server, PyTorch download,
 PLAY-KEV.bat
 ```
 
-The launcher finds the default model at `C:\Users\Dhane\dev\kev-onnx-backup\kev07b_fp16_L256.onnx` and the Qwen tokenizer in the Hugging Face cache. Override either with `-Model` and `-Tokenizer`, or with `LANESHIFT_ONNX_MODEL` and `LANESHIFT_ONNX_TOKENIZER`.
+The launcher finds the model at `C:\LANESHIFT2D-Kev-model\kev07b_fp16_L256.onnx` and the tokenizer beside it. Override either with `-Model` and `-Tokenizer`, or with `LANESHIFT_ONNX_MODEL` and `LANESHIFT_ONNX_TOKENIZER`.
 
 ```powershell
 PLAY-KEV.bat -Windowed
@@ -93,6 +93,32 @@ The controller starts on port `8766`, waits for the model to load, then launches
 This mode is intentionally slower. A 1–4 s decision is acceptable because the
 world waits. Use it to judge the model, not to play the normal safety-enabled
 game.
+
+## What Kev sees
+
+The default `scene` prompt sends every vehicle the renderer draws at the
+decision snapshot, plus relevant off-screen traffic in a separate `OFF`
+section. It does not reduce traffic to a nearest-vehicle summary. The full
+field inventory, visibility rules, before/after examples and token budget are
+in [`docs/OBSERVATION-AUDIT.md`](docs/OBSERVATION-AUDIT.md).
+
+```text
+v2
+P C C 20 3 0 0 100 0 0 S
+V laneDZ close abs type; +ahead -behind +closing; c car k truck
+ON
+L+33 +7 13 t
+R+47 +2 18 c
+R+51 +6 14 t
+R+69 +2 18 t
+OFF
+none
+L1/0 C0/0 R3/0
+```
+
+Lane changes take about 0.27 s, so `LEFT`/`RIGHT` are not legal again until
+the next decision. The observation includes the player's target lane,
+lane-change progress, remaining estimate, cooldown and previous actions.
 
 The packaged build contains the game, controller and Python runtime. The model lives on the normal `C:` disk:
 
@@ -122,7 +148,9 @@ Every session writes `manifest.json`, `telemetry.jsonl`, `events.jsonl`, and
 
 The session manifest records the session ID, UTC start and end times, build commit,
 engine version, recording schema version, status, and record counts. Human actions are
-labelled `human`; they are never relabelled as model actions.
+labelled `human`; they are never relabelled as model actions. Human `state_before`
+snapshots use observation schema 2. Schema-1 recordings stay raw and are excluded
+from v2 training unless `--allow-legacy` is passed.
 
 ## Running the Python controller
 

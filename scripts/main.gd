@@ -22,6 +22,8 @@ const LANE_HALF_PX := 60.0
 const ROAD_HALF_PX := 180.0
 const PX_PER_M_NEAR := 30.0
 const VIEW_Z := 110.0
+const OBSERVATION_SCHEMA_VERSION := 2
+const TRAFFIC_CULL_BEHIND_M := 12.0
 const CAMERA_DISTANCE := 55.0
 const HORIZON_Y := 0.14
 const DASH_LENGTH_M := 2.6
@@ -1270,7 +1272,7 @@ func _on_net_disconnected() -> void:
 	_update_menu_status()
 
 func _submit_action(action: String, duration: float, control_source: String, label_source: String, controller_seq: int = -1, state_tick: int = -1, decision_state: Dictionary = {}, decision_metadata: Dictionary = {}, count_action: bool = true) -> bool:
-	var application_state: Dictionary = sim.get_snapshot()
+	var application_state: Dictionary = _observation_snapshot()
 	var state_before: Dictionary = decision_state.duplicate(true) if not decision_state.is_empty() else application_state
 	var decision_tick := int(state_before.get("physics_tick", state_tick if state_tick >= 0 else sim.physics_tick))
 	var application_tick := sim.physics_tick
@@ -1322,6 +1324,27 @@ func _log_score_milestones(current_score: float) -> void:
 	while reached_milestone > last_score_milestone:
 		last_score_milestone += 100
 		_log_event("score_milestone", {"milestone": last_score_milestone, "score": current_score})
+
+func _observation_snapshot() -> Dictionary:
+	var snapshot := sim.get_snapshot()
+	snapshot["observation_schema"] = OBSERVATION_SCHEMA_VERSION
+	for vehicle in snapshot.get("traffic", []):
+		# get_snapshot stores the signed gap directly; using the absolute
+		# position here silently marked every vehicle off-screen once the
+		# player had moved away from z=0.
+		var z_rel := float(vehicle.get("relative_distance_z", 0.0))
+		vehicle["on_screen"] = z_rel >= -TRAFFIC_CULL_BEHIND_M and z_rel <= VIEW_Z
+		vehicle["ahead"] = z_rel > 0.0
+		vehicle["absolute_speed"] = float(vehicle.get("speed", 0.0))
+	var recent: Array = []
+	for entry in recent_action_history:
+		if entry is Dictionary and typeof(entry.get("action")) == TYPE_STRING:
+			recent.append(String(entry["action"]))
+	if recent.size() > 8:
+		recent = recent.slice(recent.size() - 8)
+	snapshot["player"]["recent_actions"] = recent
+	snapshot["player"]["previous_action"] = String(recent[-1]) if not recent.is_empty() else sim.current_action
+	return snapshot
 
 func _remember_decision_state(snapshot: Dictionary) -> void:
 	var tick := int(snapshot.get("physics_tick", -1))
@@ -1414,7 +1437,7 @@ func _physics_process(delta: float) -> void:
 				telemetry_timer += delta
 				if telemetry_timer >= 1.0 / telemetry_hz:
 					telemetry_timer = 0.0
-					var turn_snap: Dictionary = sim.get_snapshot()
+					var turn_snap: Dictionary = _observation_snapshot()
 					turn_snap["wall_time_unix"] = Time.get_unix_time_from_system()
 					turn_snap["wall_time_monotonic_msec"] = Time.get_ticks_msec()
 					if telemetry != null:
@@ -1441,7 +1464,7 @@ func _physics_process(delta: float) -> void:
 			telemetry_timer += delta
 			if telemetry_timer >= 1.0 / telemetry_hz:
 				telemetry_timer = 0.0
-				var snap: Dictionary = sim.get_snapshot()
+				var snap: Dictionary = _observation_snapshot()
 				snap["wall_time_unix"] = Time.get_unix_time_from_system()
 				snap["wall_time_monotonic_msec"] = Time.get_ticks_msec()
 				if telemetry != null:
@@ -1449,7 +1472,7 @@ func _physics_process(delta: float) -> void:
 		decision_timer += delta
 		if decision_timer >= 1.0 / decision_hz:
 			decision_timer = 0.0
-			var snap2: Dictionary = sim.get_snapshot()
+			var snap2: Dictionary = _observation_snapshot()
 			snap2["wall_time_unix"] = Time.get_unix_time_from_system()
 			snap2["wall_time_monotonic_msec"] = Time.get_ticks_msec()
 			_remember_decision_state(snap2)
@@ -1464,7 +1487,7 @@ func _begin_turn_decision() -> void:
 	turn_waiting = true
 	turn_wait_started_msec = Time.get_ticks_msec()
 	turn_decision_count += 1
-	var snapshot: Dictionary = sim.get_snapshot()
+	var snapshot: Dictionary = _observation_snapshot()
 	snapshot["wall_time_unix"] = Time.get_unix_time_from_system()
 	snapshot["wall_time_monotonic_msec"] = Time.get_ticks_msec()
 	_remember_decision_state(snapshot)
