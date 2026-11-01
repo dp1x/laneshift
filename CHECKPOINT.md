@@ -23,6 +23,12 @@
 - Watch mode with safety heartbeat: 7 of 8 seeds survived the full 15 seconds; one seed crashed at 4.5 s. Pure Kev still chose `STAY` every time; the lane changes were safety-layer actions labelled `controller_fallback`.
 - Matched pilot: `rule_based` vs `onnx_kev`, same 5 seeds, 20 s, density 0.7, sim speed 1.0. See `docs/RESULTS.md` for the numbers.
 
+## Current autonomous milestone
+
+- Worktree: `C:\Users\Dhane\dev\cris@ds-training`, branch `training/pilot`.
+- Goal: decision-level dataset export and a small supervised baseline with held-out seed metrics.
+- Human gate: data source, approved labels, fine-tune target, GPU budget and the final evaluation claim. See `docs/NEXT-GATE.md`.
+
 ## Remaining work
 
 - No fine-tuned Kev checkpoint exists. The `fine_tuned_model` path is implemented and can be labelled, but it has not been trained.
