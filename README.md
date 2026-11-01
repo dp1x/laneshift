@@ -79,9 +79,19 @@ PLAY-KEV.bat -Episodes 10 -EpisodeDuration 20
 
 The controller starts on port `8766`, waits for the model to load, then launches the game in auto-run with Kev in control. The bottom-right instrument shows the model alias, the chosen action, the probability and the inference latency. The player has a cyan ring while the external controller has control. Close the game window to stop both processes.
 
-The packaged build can be extracted to `R:`. ONNX Runtime cannot validate the external-data path on that RAM disk, so the controller loads the 1.5 GB weight blob into memory with conservative session options. The first load can take 30–120 seconds; the launcher waits for it. The extracted-on-`R:` test accepted real Kev decisions with `control_source=original_model`. Inference is slower on that path, around 3.5–4.5 s per decision.
+The packaged build contains the game, controller and Python runtime. The model lives on the normal `C:` disk:
+
+```text
+C:\LANESHIFT2D-Kev-model\kev07b_fp16_L256.onnx
+C:\LANESHIFT2D-Kev-model\kev07b_fp16.data
+C:\LANESHIFT2D-Kev-model\tokenizer.json
+```
+
+That gives ONNX Runtime a normal NTFS path. On an idle machine it runs about 1.4–2.0 s per decision. Close any other running game before launching; a second render loop can starve the model and push inference past 8 s.
 
 `PLAY-KEV.bat` also enables a watch-mode safety layer. While the model is thinking, the controller sends a fresh rule-based lane or brake action if a collision is imminent. If the model returns an uncertain `STAY` (max probability below 0.55), the rule policy can veto it. These actions are labelled `controller_fallback` and the AI panel shows `FALLBACK`; the model probabilities remain visible. The matched experiment runner never enables this layer, so the research comparison stays pure.
+
+With the model on `C:` and the safety layer enabled, a 15-second seed sweep produced 8 decisions per episode and 7 of 8 episodes survived the full 15 seconds. The one failure was a crash at 4.5 s on seed 8. Pure Kev still chose `STAY` in every decision; the lane changes came from the safety layer.
 
 The released checkpoint's confidence is low: in the 60-second run its probabilities were roughly `STAY 0.38–0.41`, `LEFT 0.17–0.24`, `RIGHT 0.19–0.22`, `BRAKE 0.16–0.24`. `STAY` was the argmax every time. The model is choosing the least-bad option from a nearly uniform distribution, not a confident driving decision.
 

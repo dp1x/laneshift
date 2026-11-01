@@ -25,23 +25,32 @@ if ($packaged) {
 $logDir = Join-Path $root "logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
+$cModel = "C:\LANESHIFT2D-Kev-model\kev07b_fp16_L256.onnx"
+$cTokenizer = "C:\LANESHIFT2D-Kev-model\tokenizer.json"
 if ($packaged) {
     $pythonExe = Join-Path $root "runtime\py\python.exe"
     $pythonDir = Join-Path $root "controller"
-    $gameExe = Join-Path $root "LANESHIFT.exe"
-    if (-not $Model) { $Model = Join-Path $root "runtime\kev07b_fp16_L256.onnx" }
-    if (-not $Tokenizer) { $Tokenizer = Join-Path $root "runtime\tokenizer.json" }
+    $nextExe = Join-Path $root "LANESHIFT-next.exe"
+    $gameExe = if (Test-Path $nextExe) { $nextExe } else { Join-Path $root "LANESHIFT.exe" }
+    if (-not $Model) {
+        $Model = if (Test-Path $cModel) { $cModel } else { Join-Path $root "runtime\kev07b_fp16_L256.onnx" }
+    }
+    if (-not $Tokenizer) {
+        $Tokenizer = if (Test-Path $cTokenizer) { $cTokenizer } else { Join-Path $root "runtime\tokenizer.json" }
+    }
 } else {
     $pythonExe = "python"
     $pythonDir = Join-Path $root "python"
     $gameExe = ""
     if (-not $Model) {
-        $Model = "C:\Users\Dhane\dev\kev-onnx-backup\kev07b_fp16_L256.onnx"
+        $Model = if (Test-Path $cModel) { $cModel } else { "C:\Users\Dhane\dev\kev-onnx-backup\kev07b_fp16_L256.onnx" }
     }
     if (-not $Tokenizer) {
-        $cache = Join-Path $env:USERPROFILE ".cache\huggingface\hub\models--Qwen--Qwen3.5-0.8B-Base\snapshots"
-        $found = Get-ChildItem $cache -Recurse -Filter "tokenizer.json" -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($found) { $Tokenizer = $found.FullName }
+        $Tokenizer = if (Test-Path $cTokenizer) { $cTokenizer } else {
+            $cache = Join-Path $env:USERPROFILE ".cache\huggingface\hub\models--Qwen--Qwen3.5-0.8B-Base\snapshots"
+            $found = Get-ChildItem $cache -Recurse -Filter "tokenizer.json" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $found.FullName }
+        }
     }
 }
 if (-not (Test-Path $Model)) {
@@ -118,6 +127,7 @@ try {
         "--ws-port=$Port",
         "--traffic-density=0.7",
         "--sim-speed-scale=1.0",
+        "--max-fps=30",
         "--external-timeout-ms=12000",
         "--max-stale-ticks=6000"
     )

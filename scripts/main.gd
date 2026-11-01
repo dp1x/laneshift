@@ -111,6 +111,7 @@ var countdown_seconds: float = 0.0
 var countdown_timer: float = 0.0
 var no_controller: bool = false
 var start_fullscreen: bool = true
+var max_fps: int = 0
 var action_event_sequence: int = 0
 var external_timeout_msec: int = 1500
 var max_stale_ticks: int = 30
@@ -196,6 +197,9 @@ func _parse_args() -> void:
 	countdown_seconds = float(options["countdown"])
 	no_controller = bool(options["no_controller"])
 	start_fullscreen = bool(options["fullscreen"])
+	max_fps = int(options["max_fps"])
+	if max_fps > 0:
+		Engine.max_fps = max_fps
 	websocket_port = int(options["ws_port"])
 	external_timeout_msec = int(options["external_timeout_ms"])
 	max_stale_ticks = int(options["max_stale_ticks"])
@@ -218,6 +222,7 @@ static func parse_options(args: PackedStringArray) -> Dictionary:
 		"countdown": 0.0,
 		"no_controller": false,
 		"fullscreen": true,
+		"max_fps": 0,
 		"ws_port": 8766,
 		"external_timeout_ms": 1500,
 		"max_stale_ticks": 30,
@@ -242,6 +247,11 @@ static func parse_options(args: PackedStringArray) -> Dictionary:
 			continue
 		if arg == "--windowed":
 			options["fullscreen"] = false
+			continue
+		if arg.begins_with("--max-fps="):
+			var fps := arg.trim_prefix("--max-fps=")
+			if fps.is_valid_int():
+				options["max_fps"] = clampi(int(fps), 0, 240)
 			continue
 		var split := arg.split("=", true, 1)
 		if split.size() != 2:
