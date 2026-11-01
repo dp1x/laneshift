@@ -10,6 +10,7 @@
 - Python controller with `dummy`, `rule_based`, local ONNX Kev and the HTTP Kev System One adapter. The ONNX path records a configurable model id, label source and SHA-256 of the model file.
 - The packaged launcher uses `Start-Process` for the exported game so `--ws-port` survives the Windows argument binding, and waits for the controller before launching.
 - The ONNX policy falls back to in-memory external weights on RAM disks. This is what makes the packaged agent work when the folder is extracted to `R:`; the first load is slower.
+- Watch mode has a rule-based safety heartbeat and low-confidence veto, labelled `controller_fallback`. The experiment runner does not enable it.
 - Matched experiment runner for baselines and ONNX. It passes the same seed list, duration, traffic density, simulation speed, timeout and staleness bounds to every policy.
 - One-click local Kev play: `PLAY-KEV.bat` starts the ONNX controller and the game, opens the AI instrument and records the session.
 

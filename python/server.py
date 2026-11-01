@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import inspect
+from dataclasses import replace
 import json
 import math
 import os
@@ -134,9 +135,13 @@ class ControllerServer:
         decisions_config=None,
         decision_timeout=0.4,
         max_state_age_s=0.4,
+        safety_fallback=False,
+        safety_threshold=0.55,
     ):
         self.policy_name = policy_name
         self.policy = load_policy(policy_name, model_configs, http_client, onnx_config, decisions_config)
+        self.safety_policy = RuleBasedPolicy() if safety_fallback else None
+        self.safety_threshold = float(safety_threshold)
         self.duration = duration
         self.expected_episodes = expected_episodes
         self.decision_timeout = decision_timeout
@@ -162,6 +167,7 @@ class ControllerServer:
         self.stale_decisions = 0
         self.states_received = 0
         self.max_event_loop_lag_ms = 0.0
+        self.last_action_msec = 0.0
 
     async def start(self):
         start = getattr(self.policy, "start", None)
@@ -173,6 +179,11 @@ class ControllerServer:
         state_queue: asyncio.Queue = asyncio.Queue(maxsize=1)
         latest_state: dict[str, Any] = {"state": None}
         decision_task = asyncio.create_task(self._decision_loop(websocket, state_queue, latest_state))
+        heartbeat_task = (
+            asyncio.create_task(self._safety_heartbeat(websocket, latest_state))
+            if self.safety_policy is not None and self.policy_name == "onnx_kev"
+            else None
+        )
         try:
             async for raw in websocket:
                 try:
@@ -217,10 +228,46 @@ class ControllerServer:
         finally:
             print("controller: client disconnected", flush=True)
             decision_task.cancel()
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
             try:
                 await decision_task
             except asyncio.CancelledError:
                 pass
+            if heartbeat_task is not None:
+                try:
+                    await heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+
+    async def _safety_heartbeat(self, websocket, latest_state):
+        """Send a fresh rule action while the slow model is still thinking.
+
+        This is watch-mode only. The experiment runner never enables it.
+        """
+        while True:
+            await asyncio.sleep(0.25)
+            state = latest_state.get("state")
+            if not isinstance(state, dict) or self.safety_policy is None:
+                continue
+            if time.monotonic() - self.last_action_msec < 0.75:
+                continue
+            action = self.safety_policy.choose_action(state)
+            if action == "STAY" or action not in state.get("legal_actions", []):
+                continue
+            self.sequence += 1
+            metadata = {
+                "policy_name": "safety_rule",
+                "fallback_reason": "model_busy_safety",
+            }
+            try:
+                await websocket.send(json.dumps(make_action_message(
+                    state, self.sequence, action, self.duration, "controller_fallback", metadata
+                )))
+            except websockets.ConnectionClosed:
+                return
+            self.actions[action] += 1
+            self.last_action_msec = time.monotonic()
 
     async def _decision_loop(self, websocket, state_queue: asyncio.Queue, latest_state: dict[str, Any]):
         while True:
@@ -288,10 +335,18 @@ class ControllerServer:
 
         legal_actions = state["legal_actions"]
         if decision is None:
+            fallback_action = "STAY" if "STAY" in legal_actions else legal_actions[0]
+            fallback_policy = self.policy_name
+            if self.safety_policy is not None and self.policy_name == "onnx_kev":
+                safe_action = self.safety_policy.choose_action(state)
+                if safe_action in legal_actions and safe_action != "STAY":
+                    fallback_action = safe_action
+                    fallback_policy = "safety_rule"
+                    fallback_reason = (fallback_reason or "inference_error") + "_safety"
             decision = PolicyDecision(
-                action="STAY" if "STAY" in legal_actions else legal_actions[0],
+                action=fallback_action,
                 label_source="controller_fallback",
-                policy_name=self.policy_name,
+                policy_name=fallback_policy,
                 model_id=error_details.get("model_id", getattr(self.policy, "actual_run", None)),
                 model_alias=error_details.get("model_alias", getattr(self.policy, "model_alias", None)),
                 probabilities=error_details.get("probabilities"),
@@ -324,7 +379,23 @@ class ControllerServer:
                 fallback_reason=fallback_reason,
             )
 
+        if self.safety_policy is not None and self.policy_name == "onnx_kev" and decision.action == "STAY":
+            probabilities = decision.probabilities or {}
+            top_probability = max(probabilities.values()) if probabilities else 0.0
+            if top_probability < self.safety_threshold:
+                safe_action = self.safety_policy.choose_action(state)
+                if safe_action in legal_actions and safe_action != "STAY":
+                    decision = replace(
+                        decision,
+                        action=safe_action,
+                        label_source="controller_fallback",
+                        policy_name="safety_rule",
+                        fallback_reason="low_confidence_safety",
+                    )
+                    fallback_reason = "low_confidence_safety"
+
         self.sequence += 1
+        self.last_action_msec = time.monotonic()
         metadata = decision.to_metadata()
         metadata.update({
             "decision_state_id": state.get("state_id"),
@@ -464,6 +535,8 @@ async def run_server(args):
             decisions_config=decisions_config,
             decision_timeout=args.decision_timeout,
             max_state_age_s=args.max_state_age,
+            safety_fallback=args.safety_fallback,
+            safety_threshold=args.safety_threshold,
         )
         await server.start()
         lag_task = asyncio.create_task(server._lag_monitor())
@@ -499,6 +572,10 @@ def parse_args(argv=None):
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--duration", type=float, default=0.35)
     parser.add_argument("--decision-timeout", type=float, default=0.45)
+    parser.add_argument("--safety-fallback", action="store_true",
+                        help="let the rule policy veto an uncertain STAY in watch mode")
+    parser.add_argument("--safety-threshold", type=float, default=0.55,
+                        help="minimum max probability before the safety veto applies")
     parser.add_argument("--max-state-age", type=float, default=0.4,
                         help="how stale a decision's state may be, in seconds of simulation time, before it is discarded")
     parser.add_argument("--expected-episodes", type=int, default=0)

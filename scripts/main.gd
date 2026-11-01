@@ -68,6 +68,7 @@ var ai_model_label: Label
 var ai_action_label: Label
 var ai_prob_label: Label
 var ai_latency_label: Label
+var ai_distribution_label: Label
 var ai_state_label: Label
 var ai_history: Control
 var notice_timer: float = 0.0
@@ -613,7 +614,7 @@ func _build_ui() -> void:
 	var controls_hint := _make_label("ESC  PAUSE     F11  FULLSCREEN", 8, UI_FAINT, false, true)
 	controls_box.add_child(controls_hint)
 
-	var ai_box := _corner_box(hud, Vector2(1, 1), Vector2(-36, -28), Vector2(330, 132), true, true)
+	var ai_box := _corner_box(hud, Vector2(1, 1), Vector2(-36, -28), Vector2(330, 150), true, true)
 	ai_panel = ai_box
 	ai_state_label = _make_label("● HUMAN", 9, UI_MUTED, false, true)
 	ai_state_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -635,6 +636,9 @@ func _build_ui() -> void:
 	ai_history.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ai_history.draw.connect(_draw_ai_history)
 	ai_box.add_child(ai_history)
+	ai_distribution_label = _make_label("", 8, UI_FAINT, true, true)
+	ai_distribution_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	ai_box.add_child(ai_distribution_label)
 	ai_latency_label = _make_label("", 9, UI_FAINT, true, true)
 	ai_latency_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	ai_box.add_child(ai_latency_label)
@@ -1137,7 +1141,7 @@ func _on_net_action(action: String, duration: float, seq: int, tick: int, episod
 		"label_source": label_source,
 		"decision_metadata": decision_metadata
 	})
-	_update_ai_panel(action, label_source, decision_metadata)
+	_update_ai_panel(action, label_source, decision_metadata, tick)
 	if state != "playing":
 		_log_event("external_action_ignored", {"controller_seq": seq, "requested_action": action, "reason": "episode_not_playing", "decision_metadata": decision_metadata})
 		return
@@ -1568,6 +1572,7 @@ func _update_ai_status() -> void:
 		ai_model_label.text = "NO CONTROLLER"
 		ai_action_label.text = "--"
 		ai_prob_label.text = ""
+		ai_distribution_label.text = ""
 		ai_latency_label.text = ""
 		conn_label.text = "LOCAL · OFFLINE"
 	elif external_control or auto_run:
@@ -1576,6 +1581,7 @@ func _update_ai_status() -> void:
 		ai_model_label.text = "KEV-ONNX · 0.8B"
 		ai_action_label.text = "WAITING"
 		ai_prob_label.text = ""
+		ai_distribution_label.text = ""
 		ai_latency_label.text = ""
 		conn_label.text = "LOCAL · 8766"
 	else:
@@ -1584,6 +1590,7 @@ func _update_ai_status() -> void:
 		ai_model_label.text = "CONTROLLER READY"
 		ai_action_label.text = "--"
 		ai_prob_label.text = ""
+		ai_distribution_label.text = ""
 		ai_latency_label.text = "PRESS T TO HAND OVER"
 		conn_label.text = "LOCAL · 8766"
 
@@ -1654,7 +1661,7 @@ func _update_audio() -> void:
 	engine_player.volume_db = -20.0
 	engine_player.pitch_scale = 0.65 + clampf(sim.player_speed / maxf(1.0, sim.max_speed), 0.0, 1.0) * 0.7
 
-func _update_ai_panel(action: String, label_source: String, metadata: Dictionary) -> void:
+func _update_ai_panel(action: String, label_source: String, metadata: Dictionary, decision_tick: int = -1) -> void:
 	if ai_model_label == null:
 		return
 	var model_text := String(metadata.get("model_alias", metadata.get("model_id", label_source)))
@@ -1679,7 +1686,17 @@ func _update_ai_panel(action: String, label_source: String, metadata: Dictionary
 	ai_action_label.text = action
 	ai_prob_label.text = "%d%%" % int(round(probability * 100.0))
 	var latency := float(metadata.get("model_latency_ms", metadata.get("client_latency_ms", 0.0)))
-	ai_latency_label.text = "%.2f S" % (latency / 1000.0)
+	var age := maxf(0.0, float(sim.physics_tick - decision_tick) / 60.0) if decision_tick >= 0 else 0.0
+	ai_latency_label.text = "%.2f S  ·  AGE %.1f S" % [latency / 1000.0, age]
+	if typeof(probabilities) == TYPE_DICTIONARY:
+		ai_distribution_label.text = "L %d   S %d   R %d   B %d" % [
+			int(round(float(probabilities.get("LEFT", 0.0)) * 100.0)),
+			int(round(float(probabilities.get("STAY", 0.0)) * 100.0)),
+			int(round(float(probabilities.get("RIGHT", 0.0)) * 100.0)),
+			int(round(float(probabilities.get("BRAKE", 0.0)) * 100.0)),
+		]
+	else:
+		ai_distribution_label.text = ""
 	ai_history_actions.append(action)
 	while ai_history_actions.size() > 12:
 		ai_history_actions.pop_front()

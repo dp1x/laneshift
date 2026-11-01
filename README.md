@@ -79,7 +79,11 @@ PLAY-KEV.bat -Episodes 10 -EpisodeDuration 20
 
 The controller starts on port `8766`, waits for the model to load, then launches the game in auto-run with Kev in control. The bottom-right instrument shows the model alias, the chosen action, the probability and the inference latency. The player has a cyan ring while the external controller has control. Close the game window to stop both processes.
 
-The packaged build can be extracted to `R:`. ONNX Runtime cannot validate the external-data path on that RAM disk, so the controller loads the 1.5 GB weight blob into memory with conservative session options. The first load can take 30–90 seconds; the launcher waits for it. The extracted-on-`R:` test accepted real Kev decisions with `control_source=original_model`. Inference is slower on that path, around 4.5 s per decision.
+The packaged build can be extracted to `R:`. ONNX Runtime cannot validate the external-data path on that RAM disk, so the controller loads the 1.5 GB weight blob into memory with conservative session options. The first load can take 30–120 seconds; the launcher waits for it. The extracted-on-`R:` test accepted real Kev decisions with `control_source=original_model`. Inference is slower on that path, around 3.5–4.5 s per decision.
+
+`PLAY-KEV.bat` also enables a watch-mode safety layer. While the model is thinking, the controller sends a fresh rule-based lane or brake action if a collision is imminent. If the model returns an uncertain `STAY` (max probability below 0.55), the rule policy can veto it. These actions are labelled `controller_fallback` and the AI panel shows `FALLBACK`; the model probabilities remain visible. The matched experiment runner never enables this layer, so the research comparison stays pure.
+
+The released checkpoint's confidence is low: in the 60-second run its probabilities were roughly `STAY 0.38–0.41`, `LEFT 0.17–0.24`, `RIGHT 0.19–0.22`, `BRAKE 0.16–0.24`. `STAY` was the argmax every time. The model is choosing the least-bad option from a nearly uniform distribution, not a confident driving decision.
 
 The controller log is written to `logs\kev-controller.log`.
 
@@ -190,6 +194,8 @@ The three files record different things:
 - **`telemetry.jsonl`** holds periodic state snapshots, sampled on simulation time rather than render time. A snapshot is a complete description of the world at one physics tick.
 - **`events.jsonl`** holds discrete events: scenario initialisation, episode start/reset/end, action requests, action application, action rejections, collisions, pause and resume, controller connection changes.
 - **`episodes.jsonl`** holds one summary per finished episode.
+
+A 60-second session at 30 Hz writes about 1.8 MB of telemetry: roughly 1,680 snapshots at ~1.1 KB each. The other files are much smaller; there is no fixed 1.5 MB base. A 15-second episode is about 450 snapshots and 500 KB.
 
 A real snapshot, trimmed to the interesting fields:
 

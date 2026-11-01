@@ -2,6 +2,7 @@ import unittest
 import asyncio
 import json
 
+from policy import PolicyDecision
 from server import ALLOWED_ACTIONS, ControllerServer, load_policy, make_action_message, parse_args, validate_state_message
 
 
@@ -39,6 +40,19 @@ class SlowPolicy:
     async def choose_action(self, _state):
         await asyncio.sleep(0.05)
         return "LEFT"
+
+
+class UncertainStayPolicy:
+    label_source = "original_model"
+
+    def choose_action(self, _state):
+        return PolicyDecision(
+            action="STAY",
+            label_source="original_model",
+            policy_name="onnx_kev",
+            probabilities={"LEFT": 0.22, "STAY": 0.40, "RIGHT": 0.21, "BRAKE": 0.17},
+            confidence=0.40,
+        )
 
 
 class ProtocolTests(unittest.TestCase):
@@ -122,6 +136,21 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(socket.messages[0]["action"], "STAY")
         self.assertEqual(socket.messages[0]["label_source"], "controller_fallback")
         self.assertEqual(server.invalid_actions, 1)
+
+    def test_watch_safety_vetoes_an_uncertain_stay_when_a_lane_is_clear(self):
+        server = ControllerServer("rule_based", decision_timeout=0.2, safety_fallback=True)
+        server.policy_name = "onnx_kev"
+        server.policy = UncertainStayPolicy()
+        state = sample_state()
+        state["traffic"] = [{
+            "id": "veh_1", "lane": 1, "relative_distance_z": 10.0,
+            "relative_speed_z": 2.0, "type": "car",
+        }]
+        socket = CaptureSocket()
+        asyncio.run(server._handle_state(socket, state))
+        self.assertIn(socket.messages[0]["action"], {"LEFT", "RIGHT", "BRAKE"})
+        self.assertEqual(socket.messages[0]["label_source"], "controller_fallback")
+        self.assertEqual(socket.messages[0]["decision_metadata"]["fallback_reason"], "low_confidence_safety")
 
     def test_slow_policy_times_out_to_unlabelled_safe_fallback(self):
         server = ControllerServer("rule_based", decision_timeout=0.005)

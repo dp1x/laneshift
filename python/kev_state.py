@@ -28,7 +28,7 @@ def _round(value: Any, digits: int = 2) -> float | None:
     return round(float(value), digits)
 
 
-def compact_kev_state(state: dict[str, Any], max_vehicles: int = 5) -> dict[str, Any]:
+def compact_kev_state(state: dict[str, Any], max_vehicles: int = 3) -> dict[str, Any]:
     """Project a game state snapshot into the shape the model receives.
 
     Traffic is ordered by absolute distance and capped so the nearest vehicle

@@ -11,7 +11,8 @@ param(
     [int]$Episodes = 999,
     [double]$EpisodeDuration = 0,
     [switch]$Windowed,
-    [switch]$Headless
+    [switch]$Headless,
+    [switch]$NoSafety
 )
 
 $ErrorActionPreference = "Stop"
@@ -70,12 +71,15 @@ $controllerArgs = @(
     "--decision-timeout", "10.0",
     "--max-state-age", "10.0"
 )
+if (-not $NoSafety) {
+    $controllerArgs += "--safety-fallback"
+}
 
 Write-Host "Starting local Kev ONNX controller on port $Port..."
 $controller = Start-Process -FilePath $pythonExe -ArgumentList $controllerArgs -WorkingDirectory $pythonDir -PassThru -WindowStyle Hidden -RedirectStandardOutput $controllerLog -RedirectStandardError $controllerErr
 
 try {
-    $deadline = (Get-Date).AddSeconds(90)
+    $deadline = (Get-Date).AddSeconds(180)
     $ready = $false
     while ((Get-Date) -lt $deadline) {
         if ($controller.HasExited) {
@@ -108,7 +112,7 @@ try {
 
     $gameArgs = @(
         "--auto-run",
-        "--seeds=1",
+        "--seeds=1,2,3,4,5,6,7,8",
         "--episodes=$Episodes",
         "--episode-duration=$EpisodeDuration",
         "--ws-port=$Port",

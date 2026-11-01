@@ -43,6 +43,14 @@ def _render(value: Any, indent: int = 0) -> str:
     )
 
 
+def _file_sha256(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _user_tokens(tok: Tokenizer, text: str) -> list[int]:
     safe = _SPECIAL_RE.sub(r"<¦\1¦>", text)
     return tok.encode(safe, add_special_tokens=False).ids
@@ -79,7 +87,7 @@ class OnnxKevPolicy:
 
     async def start(self) -> None:
         self.tok = Tokenizer.from_file(self.tokenizer_path)
-        self.model_sha256 = hashlib.sha256(Path(self.model_path).read_bytes()).hexdigest()
+        self.model_sha256 = _file_sha256(self.model_path)
         blob_path = Path(self.data_path) if self.data_path else Path(self.model_path).with_name("kev07b_fp16.data")
         last_error: Exception | None = None
         drive = Path(self.model_path).drive.upper() if Path(self.model_path).drive else ""
