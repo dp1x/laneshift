@@ -44,7 +44,6 @@ experiments/20261102-teacher-fresh/
 experiments/20261102-teacher-fresh-v2/
 
 # Canonical dataset and selected final validation results are tracked
-!datasets/pilot-v1/**
 !datasets/pilot-v1/*.metrics.json
 !experiments/20261102-teacher-fresh-v3/comparison.csv
 !experiments/20261102-teacher-fresh-v3/*.metrics.json
