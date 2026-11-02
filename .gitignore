@@ -2,7 +2,9 @@
 __pycache__/
 *.py[cod]
 .venv/
+.venv-host/
 venv/
+models/
 results/
 data/
 checkpoints/
@@ -11,6 +13,12 @@ runs/
 *.ckpt
 *.pt
 *.pth
+*.onnx
+*.data
+*.bin
+*.gguf
+tokenizer.json
+tokenizer_config.json
 *.log
 *.coverage
 .env
@@ -25,3 +33,18 @@ logs/
 config/
 *.zip
 dist/
+
+# Generated experiment sidecars
+*.translation
+*.csv.import
+
+# Local-only duplicate experiment runs
+experiments/20261102-teacher-dev/
+experiments/20261102-teacher-fresh/
+experiments/20261102-teacher-fresh-v2/
+
+# Canonical dataset and selected final validation results are tracked
+!datasets/pilot-v1/**
+!datasets/pilot-v1/*.metrics.json
+!experiments/20261102-teacher-fresh-v3/comparison.csv
+!experiments/20261102-teacher-fresh-v3/*.metrics.json
