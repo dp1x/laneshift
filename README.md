@@ -16,8 +16,10 @@ What works today:
 - Event-based action and episode logs.
 - A Python controller communicating with the game over a localhost WebSocket.
 - Dummy and rule-based policies, both usable as baselines.
-- Local ONNX Kev-0.8B inference on ARM64, about 1.4 s per decision at 256 tokens, with a model hash recorded in the provenance metadata.
-- A one-click `PLAY-KEV.bat` that starts the local Kev controller and the game together so you can watch the model drive.
+- Local ONNX Kev-0.8B inference through a separate controller process, with the model hash recorded in the provenance metadata. The x64-emulated guest VM measured roughly 2-4 s per decision. A native ARM64 guest environment measured 3.21 s isolated and 2.60 s mean in live play; native host numbers are still pending.
+- A one-click `PLAY-KEV.bat` that starts the local Kev controller and the game together in continuous live mode.
+- Continuous live mode with one inference request in flight, explicit observation-age limits, request timeouts, and no silent rule fallback. The simulation keeps rendering and stepping while Kev thinks. See [`docs/LIVE-MODE.md`](docs/LIVE-MODE.md).
+- Host setup, environment diagnostics, and an inference benchmark (`SETUP-HOST.bat`, `HOST-CHECK.bat`, `BENCH-KEV.bat`).
 - Dataset conversion and experiment tooling, including a Kev-format training export.
 - A matched-policy experiment runner. The committed pilot is small; it is a sanity check, not a finished study.
 
@@ -26,6 +28,7 @@ What has **not** been established:
 - Fine-tuning has not been performed.
 - The model has not been shown to improve gameplay over the rule-based baseline. In the pilot it does not.
 - Calibration has not been measured on real held-out human play.
+- Native host inference and acceleration have not been measured. Every performance number in this repository comes from the Hyper-V guest VM; the guest has no host filesystem or execution access.
 
 The original design conversation proposed a phone/ADB/MediaProjection capture pipeline and a computer-vision perception layer. That pipeline is not implemented. This repository is the simulation testbed: the engine supplies ground-truth state, so the remaining research question is decision quality and fine-tuning, not perception. The game itself is a focused 2D prototype, not a production game.
 
@@ -70,18 +73,28 @@ The local path uses the exported ONNX graph, so no Kev server, PyTorch download,
 PLAY-KEV.bat
 ```
 
-The launcher finds the model at `C:\LANESHIFT2D-Kev-model\kev07b_fp16_L256.onnx` and the tokenizer beside it. Override either with `-Model` and `-Tokenizer`, or with `LANESHIFT_ONNX_MODEL` and `LANESHIFT_ONNX_TOKENIZER`.
+This is **live mode**. The simulation runs continuously at its normal 60 Hz physics rate while Kev thinks in a separate controller process. The game allows one decision request in flight, applies an answer only if it belongs to the current episode and is younger than the configured observation-age bound, and keeps rendering when inference is slow, late, or failed. Late answers are dropped and logged; model errors and request timeouts clear the request without ending the episode. No rule action is substituted.
+
+The launcher finds the model in a sibling `LANESHIFT2D-Kev-model\` folder (the transfer-package layout), the project's `models\` directory, `C:\LANESHIFT2D-Kev-model\`, or the paths named by `LANESHIFT_ONNX_MODEL` / `LANESHIFT_ONNX_TOKENIZER`. It prefers an ARM64 virtual environment at `.venv-host`, checks the controller dependencies, prints the Python and ONNX Runtime architecture, and waits for the controller's `listening at` line before opening the game. Logs go to `logs\kev-controller.log` and `logs\kev-controller.err.log`.
 
 ```powershell
 PLAY-KEV.bat -Windowed
-PLAY-KEV.bat -Episodes 10 -EpisodeDuration 20
+PLAY-KEV.bat -Threads 6
+PLAY-KEV.bat -Episodes 1 -MaxEpisodes 5 -Seeds 1,2,3,4,5 -EpisodeDuration 30
+PLAY-KEV.bat -MaxDecisionAge 2 -DecisionInterval 2
 ```
 
-The controller starts on port `8766`, waits for the model to load, then launches the game in auto-run with Kev in control. The bottom-right instrument shows the model alias, the chosen action, the probability and the inference latency. The player has a cyan ring while the external controller has control. Close the game window to stop both processes.
+In live mode the launcher cycles through the seed list so a crash does not repeat the identical scenario. `-MaxEpisodes` caps the total; without it, the game keeps cycling until the window closes. In eval and watch modes, `-Episodes` keeps the experiment runner's per-seed meaning.
+
+The bottom-right instrument shows the live state (`THINKING`, `ACTION`, `STALE`, `REJECTED`, `TIMEOUT`, `ERROR`, `OFFLINE`), the last action and probability, the probability distribution, `INFER` / `AGE` / `AGO`, and the episode/seed, simulation time, decision count, failures, and timeouts. The player has a cyan ring while the external controller has control. Close the game window to stop both processes.
+
+For host setup, architecture checks, measured VM numbers, and acceleration options, see [`docs/HOST-WINDOWS-ARM64.md`](docs/HOST-WINDOWS-ARM64.md). The decision schedule, staleness semantics, and telemetry events are in [`docs/LIVE-MODE.md`](docs/LIVE-MODE.md).
+
+`PLAY-KEV-WATCH.bat` preserves the older watch mode: 10 Hz latest-state updates, a rule safety heartbeat while the model thinks, and a low-confidence STAY veto. Those actions are labelled `controller_fallback`. Live mode does not use that layer.
 
 ## Turn-based Kev evaluation
 
-`PLAY-KEV-EVAL.bat` starts a separate evaluation session. In this mode:
+`PLAY-KEV-EVAL.bat` starts a separate strict evaluation session. In this mode:
 
 - the simulation pauses at each decision point and does not advance while Kev thinks;
 - exactly one observation is sent per decision;
@@ -91,21 +104,23 @@ The controller starts on port `8766`, waits for the model to load, then launches
 - no rule action silently replaces the model.
 
 This mode is intentionally slower. A 1–4 s decision is acceptable because the
-world waits. Use it to judge the model, not to play the normal safety-enabled
-game.
+world waits. Use it to judge the model, not to watch the live demo.
 
 ## What Kev sees
 
-The default `scene` prompt sends every vehicle the renderer draws at the
-decision snapshot, plus relevant off-screen traffic in a separate `OFF`
-section. It does not reduce traffic to a nearest-vehicle summary. The full
-field inventory, visibility rules, before/after examples and token budget are
-in [`docs/OBSERVATION-AUDIT.md`](docs/OBSERVATION-AUDIT.md).
+The default `scene` prompt keeps up to nine safety-relevant vehicles: the
+nearest ahead and behind vehicle in every lane, then the nearest remaining
+vehicles. The structured observation retains every active vehicle; the prompt's
+final `X<n>` field counts relevant vehicles omitted from the text, so nothing is
+silently dropped. A dense scene therefore sends nine vehicle rows and an
+explicit omission count, not a truncated state. The full field inventory,
+visibility rules, before/after examples and token budget are in
+[`docs/OBSERVATION-AUDIT.md`](docs/OBSERVATION-AUDIT.md).
 
 ```text
 v2
 P C C 20 3 0 0 100 0 0 S
-V laneDZ close abs type; +ahead -behind +closing; c car k truck
+V laneDZ close abs type; +ahead -behind +closing; c car t truck
 ON
 L+33 +7 13 t
 R+47 +2 18 c
@@ -113,7 +128,7 @@ R+51 +6 14 t
 R+69 +2 18 t
 OFF
 none
-L1/0 C0/0 R3/0
+L1/0 C0/0 R3/0 X0
 ```
 
 Lane changes take about 0.27 s, so `LEFT`/`RIGHT` are not legal again until
@@ -128,11 +143,11 @@ C:\LANESHIFT2D-Kev-model\kev07b_fp16.data
 C:\LANESHIFT2D-Kev-model\tokenizer.json
 ```
 
-That gives ONNX Runtime a normal NTFS path. On an idle machine it runs about 1.4–2.0 s per decision. Close any other running game before launching; a second render loop can starve the model and push inference past 8 s.
+That gives ONNX Runtime a normal NTFS path. In the guest VM, where Python and ONNX Runtime are x64 under ARM64 emulation, serialized four-thread inference measured 2.0-3.1 s per decision in live runs and 3.66 s mean in an isolated benchmark. Session load took 6-12 s. A native ARM64 Python and ONNX Runtime environment inside the same guest measured 3.21 s mean isolated and 2.60 s mean in a 15 s live episode, about 12% better than emulation in the isolated comparison. The model is memory-bandwidth bound, so native ARM64 alone is not a step-change. Native host numbers have not been measured. Close other CPU-heavy applications before launching; a second render loop or a second inference session starves the model.
 
-`PLAY-KEV.bat` also enables a watch-mode safety layer. While the model is thinking, the controller sends a fresh rule-based lane or brake action if a collision is imminent. If the model returns an uncertain `STAY` (max probability below 0.55), the rule policy can veto it. These actions are labelled `controller_fallback` and the AI panel shows `FALLBACK`; the model probabilities remain visible. The matched experiment runner never enables this layer, so the research comparison stays pure.
+`PLAY-KEV.bat` runs pure model decisions in live mode. `PLAY-KEV-WATCH.bat` preserves the older safety-assisted mode: a rule heartbeat while the model thinks and a low-confidence STAY veto. Those actions are labelled `controller_fallback` and the AI panel shows `FALLBACK`; the model probabilities remain visible. The matched experiment runner never enables this layer, so the research comparison stays pure.
 
-With the model on `C:` and the safety layer enabled, a 15-second seed sweep produced 8 decisions per episode and 7 of 8 episodes survived the full 15 seconds. The one failure was a crash at 4.5 s on seed 8. Pure Kev still chose `STAY` in every decision; the lane changes came from the safety layer.
+In the earlier 15-second watch-mode seed sweep with the safety layer enabled, 7 of 8 episodes survived the full 15 seconds. Pure Kev still chose `STAY` in every decision; the lane changes came from the safety layer. In live mode, with no safety layer, Kev's own actions determine the outcome. A 10-second seed-5 episode completed; seeds 6 and 7 crashed at 3.6 s and 5.45 s after `STAY` decisions. That is a model-quality result, not an inference failure.
 
 The released checkpoint's confidence is low: in the 60-second run its probabilities were roughly `STAY 0.38–0.41`, `LEFT 0.17–0.24`, `RIGHT 0.19–0.22`, `BRAKE 0.16–0.24`. `STAY` was the argmax every time. The model is choosing the least-bad option from a nearly uniform distribution, not a confident driving decision.
 
@@ -195,7 +210,7 @@ python python/server.py --policy kev_original --kev-config kev_models.example.js
 
 | State | Status |
 | --- | --- |
-| Local ONNX inference with the released checkpoint | **Verified.** `jaredpalmer/kev-0.8b@v1.0` exported to ONNX, about 1.4 s per 256-token decision on this ARM64 CPU. |
+| Local ONNX inference with the released checkpoint | **Verified.** `jaredpalmer/kev-0.8b@v1.0` runs through the local ONNX controller. Measured 2.0-3.1 s per 256-token decision in live play in the guest VM (x64 emulation) and 2.60 s mean on native ARM64 in the same guest. Native host numbers are pending. |
 | Local HTTP inference with the released checkpoint | **Verified.** Full torch server, about 15 s per decision on this CPU. |
 | Local inference for a *fine-tuned* checkpoint | **Not done.** No fine-tuned checkpoint exists yet. The ONNX label and model id are configurable, so a fine-tuned graph can be labelled correctly. |
 | Matched rule-based vs. ONNX comparison | **Pilot only.** Same seeds, duration, traffic density and simulation speed. Small sample; see the experiment section. |
@@ -352,12 +367,16 @@ godot --headless --path . --script res://tests/game_flow_test.gd
 godot --headless --path . --script res://tests/network_test.gd
 godot --headless --path . --script res://tests/telemetry_test.gd
 godot --headless --path . --script res://tests/telemetry_flow_test.gd
+godot --headless --path . --script res://tests/turn_based_test.gd
+godot --headless --path . --script res://tests/live_decision_test.gd
+godot --headless --path . --script res://tests/observation_test.gd
+godot --headless --path . --script res://tests/human_schema_test.gd
 godot --headless --path . --script res://tests/options_test.gd
 ```
 
-The Godot checks cover seeded reproducibility, physical versus target lane, legal-action generation, terminal snapshot uniqueness, synthetic keyboard input, the title/pause/crash/restart/menu flow, command validation, telemetry persistence including write-failure recovery, and the real `play -> Record -> stop` path. The Python checks cover policy provenance, action legality, the Kev request and response contract against a mock HTTP endpoint, decision timeouts, dataset joins and leakage, the Kev training export, seed-grouped splits, nearest-traffic ordering, and comparison metrics.
+The Godot checks cover seeded reproducibility, physical versus target lane, legal-action generation, terminal snapshot uniqueness, synthetic keyboard input, the title/pause/crash/restart/menu flow, command validation, telemetry persistence including write-failure recovery, the real `play -> Record -> stop` path, the turn-based evaluator, and the live one-in-flight/stale/timeout/error paths. The Python checks cover policy provenance, action legality, the Kev request and response contract against a mock HTTP endpoint, decision timeouts, decision-request gating, single-worker inference serialization, dataset joins and leakage, the Kev training export, seed-grouped splits, nearest-traffic ordering, and comparison metrics.
 
-The Python dependencies are in `python/requirements.txt` (`websockets`, `httpx`, `numpy`, `onnxruntime`, `tokenizers`):
+The Python dependencies are in `python/requirements.txt` (`websockets`, `httpx`, `numpy`, `onnxruntime`, `tokenizers`). On the host, `SETUP-HOST.bat` creates `.venv-host` with a native ARM64 interpreter. For a manual environment:
 
 ```powershell
 python -m pip install -r python/requirements.txt
@@ -392,8 +411,9 @@ The released checkpoint is slower than the decision cadence and does not avoid t
 
 ## Current limitations
 
-- Local ONNX Kev-0.8B runs at roughly 1.4 s per 256-token decision on this CPU. The game's decision cadence is 10 Hz, so most states are superseded and the model acts on a delayed snapshot. The HTTP torch path is about 15 s per decision.
-- Fine-tuning has not been performed. The matched pilot compares the released checkpoint with the rule-based baseline; it is small and the model does not win.
+- Local ONNX Kev-0.8B latency depends heavily on the environment. The x64-emulated guest VM measured 2.0-3.1 s per decision in live runs and 3.66 s mean in an isolated four-thread benchmark. Native ARM64 in the same guest measured 3.21 s isolated and 2.60 s mean in live play, about 12% better, with no NPU or GPU exposed to the VM. The HTTP torch path is about 15 s per decision. Native host numbers are pending; the benchmark tool exists for that measurement.
+- Live mode applies an action only while its observation is younger than the configured bound (5 simulated seconds by default). On a slow host this means fewer decisions and some dropped answers. The HUD shows `OK`, `STALE`, and `REJ` so the drop is visible. In the guest's visible window, the software renderer pushed inference to 4.4-11.3 s and some answers were dropped; the same native model headless measured 2.6 s. The host GPU is expected to reduce this contention, but it is unmeasured. Use the strict turn-based evaluator for decisions that must be judged without a timing race.
+- Fine-tuning has not been performed. The matched pilot compares the released checkpoint with the rule-based baseline; it is small and the model does not win. A completed live episode does not imply good driving; Kev chose STAY in every decision in the verified VM runs.
 - The game is a simple 2D experimental environment, not a realistic traffic simulator. Vehicles move along fixed lanes at constant speeds, and there is no acceleration or lane-change model for traffic.
 - The renderer uses a pseudo-perspective projection and vector shapes. It is intentionally minimal, and the road still uses a fixed three-lane layout.
 - Steering is discrete: the motorcycle changes lanes on rails rather than being steered continuously.
@@ -405,31 +425,41 @@ The released checkpoint is slower than the decision cadence and does not avoid t
 3. Fine-tune Kev and compare it with the original and rule-based policies on held-out seeds.
 4. Measure calibration (Brier score, log loss, ECE) and action distributions, not only score.
 5. Run a larger matched study; the current pilot is a sanity check.
-6. Make local inference faster, or accept the delayed-decision regime and measure it explicitly.
+6. Measure native ARM64 host inference and test optional providers only after the CPU baseline. Do not adopt an accelerator without a measured result on this graph.
+7. Evaluate the live asynchronous regime explicitly (decision age, dropped answers, action distribution) alongside the strict turn-based evaluator.
 
 ## Repository layout
 
 ```text
 project.godot            Godot project settings
 kev_models.example.json  Template registry of model policies
-PLAY-KEV.bat             One-click local ONNX Kev run
-PLAY-KEV-EVAL.bat        Turn-based, safety-disabled Kev evaluation
+PLAY-KEV.bat             One-click continuous live Kev run
+PLAY-KEV-EVAL.bat        Turn-based, safety-disabled strict evaluation
+PLAY-KEV-WATCH.bat       Legacy 10 Hz watch mode with the rule safety heartbeat
+SETUP-HOST.bat           Create the native ARM64 virtual environment
+HOST-CHECK.bat           Diagnose Python, ONNX Runtime, model and Godot
+BENCH-KEV.bat            Measure ONNX load, warm-up and inference latency
 scripts/play_kev.ps1     Starts the ONNX controller and the game together
+scripts/setup_host.ps1   Host environment setup logic
 scenes/main.tscn         Main scene; the world is built procedurally at runtime
-scripts/main.gd          Pseudo-perspective rendering, HUD, input, episode flow, recording
+scripts/main.gd          Rendering, HUD, live decision loop, input, episodes, recording
 scripts/sim/simulation.gd Authoritative simulation: state, actions, seeded traffic, collisions
 scripts/net/net_bridge.gd WebSocket client and command validation
 scripts/telemetry/telemetry_logger.gd  Buffered JSONL writer
-python/server.py         Controller server and policy selection
+python/server.py         Controller server, one-slot decision queue and inference worker
 python/policy.py         Policy interface and decision record
 python/kev_state.py      The one state projection shared by inference and training
 python/policies/         dummy, rule_based, ONNX Kev and the HTTP Kev adapter
 python/dataset_prep.py   Log validation, candidate building, Kev training export
 python/experiment_runner.py  Matched policy comparison across scenarios
+python/tools/benchmark_kev.py  Load/encode/inference latency benchmark
+python/tools/host_check.py     Environment and provider diagnostic
 python/tools/            Mock Kev service used by the tests (not a model)
 python/tests/            Python test suite
 tests/                   Godot headless test scripts
 docs/INTENT.md           Original thesis and current scope
+docs/LIVE-MODE.md        Continuous decision schedule, staleness and failure semantics
+docs/HOST-WINDOWS-ARM64.md  Host setup, VM measurements and acceleration status
 docs/RESULTS.md          Current pilot results and their limits
 ```
 
