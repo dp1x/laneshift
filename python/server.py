@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import inspect
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import json
 import math
@@ -23,12 +24,14 @@ from policy import PolicyDecision
 from policies.dummy import DummyPolicy
 from policies.model_adapter import KevInferenceError, KevSystemOnePolicy
 from policies.rule_based import RuleBasedPolicy
+from policies.safe_teacher import SafeTeacherPolicy
 
 PROTOCOL_VERSION = 1
 ALLOWED_ACTIONS = frozenset({"LEFT", "STAY", "RIGHT", "BRAKE"})
 POLICY_SOURCES = {
     "dummy": "synthetic",
     "rule_based": "rule_based",
+    "safe_teacher": "safe_teacher",
     "onnx_kev": "original_model",
     "openrouter_decisions": "external_ai",
 }
@@ -84,11 +87,30 @@ def make_action_message(state, seq, action, duration=0.35, label_source="externa
     }
 
 
+class InferenceBusy(RuntimeError):
+    """A previous decision is still running on the single inference worker."""
+
+
+def _provider_names(requested: str) -> list[str]:
+    """Map a short CLI name to canonical ONNX Runtime provider names."""
+    name = (requested or "cpu").strip().lower()
+    mapping = {
+        "cpu": ["CPUExecutionProvider"],
+        "qnn": ["QNNExecutionProvider", "CPUExecutionProvider"],
+        "dml": ["DmlExecutionProvider", "CPUExecutionProvider"],
+    }
+    if name not in mapping:
+        raise ValueError(f"unknown ONNX provider {requested!r}; choose cpu, qnn or dml")
+    return mapping[name]
+
+
 def load_policy(name, model_configs=None, http_client=None, onnx_config=None, decisions_config=None):
     if name == "dummy":
         return DummyPolicy()
     if name == "rule_based":
         return RuleBasedPolicy()
+    if name == "safe_teacher":
+        return SafeTeacherPolicy()
     if name == "openrouter_decisions":
         from policies.openrouter_decisions import OpenRouterDecisionPolicy
 
@@ -113,6 +135,7 @@ def load_policy(name, model_configs=None, http_client=None, onnx_config=None, de
             model_id=str(config.get("model_id", "") or ""),
             label_source=str(config.get("label_source", "original_model") or "original_model"),
             prompt_mode=str(config.get("prompt_mode", "compact") or "compact"),
+            providers=_provider_names(str(config.get("provider", "cpu") or "cpu")),
         )
     config = (model_configs or {}).get(name)
     if config is None:
@@ -139,22 +162,45 @@ class ControllerServer:
         safety_fallback=False,
         safety_threshold=0.55,
         evaluation_mode=False,
+        live_mode=False,
+        notify_stale=False,
+        metrics_out=None,
     ):
         self.policy_name = policy_name
         self.policy = load_policy(policy_name, model_configs, http_client, onnx_config, decisions_config)
         self.evaluation_mode = bool(evaluation_mode)
-        self.safety_policy = RuleBasedPolicy() if safety_fallback and not self.evaluation_mode else None
+        self.live_mode = bool(live_mode)
+        self.metrics_out = Path(metrics_out) if metrics_out else None
+        # In live and evaluation modes a failed decision is reported, never
+        # replaced by a rule action. The safety heartbeat belongs to watch mode.
+        self.notify_stale = bool(notify_stale or self.live_mode or self.evaluation_mode)
+        self.safety_policy = (
+            RuleBasedPolicy()
+            if safety_fallback and not self.evaluation_mode and not self.live_mode
+            else None
+        )
         self.safety_threshold = float(safety_threshold)
         self.duration = duration
         self.expected_episodes = expected_episodes
         self.decision_timeout = decision_timeout
         self.max_state_age_s = max_state_age_s
         self.shutdown_event = asyncio.Event()
+        # One synchronous decision at a time. A timed-out native inference keeps
+        # running on this worker; the next request is refused rather than
+        # stacked on top of it.
+        self._inference_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="laneshift-inference")
+        self._active_inference: asyncio.Future | None = None
+        self.inference_busy = 0
         self.sequence = 0
         self.decisions = 0
+        self.decision_requests = 0
+        self.states_ignored = 0
         self.invalid_states = 0
         self.invalid_actions = 0
         self.controller_failures = 0
+        self.model_errors = 0
+        self.decision_timeouts = 0
+        self.stale_notifications = 0
         self.protocol_rejections = 0
         self.completed_episodes = 0
         self.actions = Counter()
@@ -176,6 +222,56 @@ class ControllerServer:
         start = getattr(self.policy, "start", None)
         if start is not None:
             await start()
+
+    def close(self):
+        self._inference_executor.shutdown(wait=False, cancel_futures=False)
+
+    def write_metrics(self):
+        """Persist the counters even when the game closes the socket first."""
+        if self.metrics_out is None:
+            return
+        payload = self.metrics()
+        try:
+            self.metrics_out.parent.mkdir(parents=True, exist_ok=True)
+            self.metrics_out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        except OSError as exc:
+            print(f"controller: could not write metrics to {self.metrics_out}: {exc}", flush=True)
+
+    def _clear_active_inference(self, future: asyncio.Future) -> None:
+        # Retrieve the exception so a timed-out inference does not surface as an
+        # "exception was never retrieved" warning later.
+        if not future.cancelled():
+            future.exception()
+        if self._active_inference is future:
+            self._active_inference = None
+
+    def _accept_state(self, message, state_queue, latest_state) -> str:
+        """Validate, remember, and optionally queue one decision state.
+
+        Returns "invalid", "ignored" (a non-decision state update), or "queued".
+        Every valid state refreshes latest_state so the controller can measure
+        how old a decision's observation is when inference finishes.
+        """
+        if not validate_state_message(message):
+            self.invalid_states += 1
+            return "invalid"
+        self.states_received += 1
+        latest_state["state"] = message
+        # A live game streams cheap state updates between decisions. Only an
+        # explicit request may occupy the one-slot decision queue.
+        if not message.get("decision_request", True):
+            self.states_ignored += 1
+            return "ignored"
+        self.decision_requests += 1
+        if state_queue.full():
+            try:
+                state_queue.get_nowait()
+                state_queue.task_done()
+                self.superseded_states += 1
+            except asyncio.QueueEmpty:
+                pass
+        state_queue.put_nowait(message)
+        return "queued"
 
     async def handle_connection(self, websocket):
         print(f"controller: client connected ({websocket.remote_address})", flush=True)
@@ -200,23 +296,12 @@ class ControllerServer:
                     continue
                 kind = message.get("type") if isinstance(message, dict) else None
                 if kind == "state":
-                    if not validate_state_message(message):
-                        self.invalid_states += 1
+                    status = self._accept_state(message, state_queue, latest_state)
+                    if status == "invalid":
                         await websocket.send(json.dumps({
                             "type": "reject", "protocol_version": PROTOCOL_VERSION,
                             "seq": -1, "reason": "invalid_state"
                         }))
-                        continue
-                    self.states_received += 1
-                    latest_state["state"] = message
-                    if state_queue.full():
-                        try:
-                            state_queue.get_nowait()
-                            state_queue.task_done()
-                            self.superseded_states += 1
-                        except asyncio.QueueEmpty:
-                            pass
-                    state_queue.put_nowait(message)
                 elif kind == "event":
                     self._handle_event(message.get("event", {}))
                 elif kind == "ack":
@@ -242,6 +327,7 @@ class ControllerServer:
                     await heartbeat_task
                 except asyncio.CancelledError:
                     pass
+            self.write_metrics()
 
     async def _safety_heartbeat(self, websocket, latest_state):
         """Send a fresh rule action while the slow model is still thinking.
@@ -273,7 +359,11 @@ class ControllerServer:
             self.last_action_msec = time.monotonic()
 
     async def _send_model_error(self, websocket, state, reason: str) -> None:
-        """Evaluation mode: report failure without manufacturing an action."""
+        """Report failure without manufacturing an action.
+
+        Used by strict evaluation and by live play. The game decides whether to
+        continue the episode; the controller never labels a fallback as model.
+        """
         try:
             await websocket.send(json.dumps({
                 "type": "model_error",
@@ -292,6 +382,11 @@ class ControllerServer:
                 await self._handle_state(websocket, state, latest_state)
             except websockets.ConnectionClosed:
                 return
+            except Exception as exc:
+                # A malformed or unexpected policy result must not kill the
+                # decision loop for the rest of the episode.
+                self.model_errors += 1
+                print(f"controller: decision loop error: {type(exc).__name__}: {exc}", flush=True)
             finally:
                 state_queue.task_done()
 
@@ -308,13 +403,21 @@ class ControllerServer:
         chooser = self.policy.choose_action
         if inspect.iscoroutinefunction(chooser):
             return await asyncio.wait_for(chooser(state), timeout=self.decision_timeout)
-        return await asyncio.wait_for(asyncio.to_thread(chooser, state), timeout=self.decision_timeout)
+        if self._active_inference is not None and not self._active_inference.done():
+            raise InferenceBusy("previous inference is still running")
+        loop = asyncio.get_running_loop()
+        future = loop.run_in_executor(self._inference_executor, chooser, state)
+        self._active_inference = future
+        future.add_done_callback(self._clear_active_inference)
+        # Shield the native call: a timeout abandons the wait, not the worker.
+        return await asyncio.wait_for(asyncio.shield(future), timeout=self.decision_timeout)
 
     async def _handle_state(self, websocket, state, latest_state=None):
         if not validate_state_message(state):
             self.invalid_states += 1
             return
         started = time.perf_counter()
+        request_started_unix_ms = time.time() * 1000.0
         fallback_reason = None
         decision = None
         error_details = {}
@@ -328,30 +431,45 @@ class ControllerServer:
                     label_source=getattr(self.policy, "label_source", POLICY_SOURCES.get(self.policy_name, "external_ai")),
                     policy_name=self.policy_name,
                 )
+        except InferenceBusy:
+            self.inference_busy += 1
+            self.model_errors += 1
+            fallback_reason = "inference_busy"
+            print("controller: decision skipped: previous inference still running", flush=True)
         except asyncio.TimeoutError:
             self.controller_failures += 1
+            self.model_errors += 1
+            self.decision_timeouts += 1
             fallback_reason = "decision_timeout"
         except Exception as exc:
             self.controller_failures += 1
+            self.model_errors += 1
             fallback_reason = f"inference_error:{type(exc).__name__}:{exc}"
             error_details = getattr(exc, "details", {})
             print(f"controller: decision error: {fallback_reason}", flush=True)
         elapsed_ms = (time.perf_counter() - started) * 1000.0
         self.latencies_ms.append(elapsed_ms)
 
+        decision_age = 0.0
         if latest_state is not None:
             current = latest_state.get("state")
             if not isinstance(current, dict) or current.get("episode_id") != state.get("episode_id"):
                 self.stale_decisions += 1
+                if self.notify_stale:
+                    self.stale_notifications += 1
+                    await self._send_model_error(websocket, state, "stale_episode")
                 return
-            age = float(current.get("sim_time", 0.0)) - float(state.get("sim_time", 0.0))
-            if age < 0.0 or age > self.max_state_age_s:
+            decision_age = float(current.get("sim_time", 0.0)) - float(state.get("sim_time", 0.0))
+            if decision_age < 0.0 or decision_age > self.max_state_age_s:
                 self.stale_decisions += 1
+                if self.notify_stale:
+                    self.stale_notifications += 1
+                    await self._send_model_error(websocket, state, "stale_state")
                 return
 
         legal_actions = state["legal_actions"]
         if decision is None:
-            if self.evaluation_mode:
+            if self.evaluation_mode or self.live_mode:
                 await self._send_model_error(websocket, state, fallback_reason or "no_decision")
                 return
             fallback_action = "STAY" if "STAY" in legal_actions else legal_actions[0]
@@ -379,8 +497,9 @@ class ControllerServer:
             )
         elif decision.action not in ALLOWED_ACTIONS or decision.action not in legal_actions:
             self.invalid_actions += 1
+            self.model_errors += 1
             fallback_reason = "action_not_legal_for_decision_state"
-            if self.evaluation_mode:
+            if self.evaluation_mode or self.live_mode:
                 await self._send_model_error(websocket, state, fallback_reason)
                 return
             decision = PolicyDecision(
@@ -423,6 +542,9 @@ class ControllerServer:
             "decision_state_id": state.get("state_id"),
             "decision_tick": state.get("physics_tick"),
             "controller_decision_latency_ms": round(elapsed_ms, 2),
+            "controller_decision_started_unix_ms": round(request_started_unix_ms, 2),
+            "controller_decision_completed_unix_ms": round(time.time() * 1000.0, 2),
+            "decision_age_s": round(decision_age, 3),
         })
         self.actions[decision.action] += 1
         self.decisions += 1
@@ -484,7 +606,9 @@ class ControllerServer:
             "model_alias": model_alias,
             "model_sha256": getattr(self.policy, "model_sha256", ""),
             "evaluation_mode": self.evaluation_mode,
+            "live_mode": self.live_mode,
             "decisions": self.decisions,
+            "decision_requests": self.decision_requests,
             "actions": dict(self.actions),
             "applied_actions": dict(self.applied_actions),
             "rejected_actions": self.rejected_actions,
@@ -492,8 +616,13 @@ class ControllerServer:
             "invalid_actions": self.invalid_actions,
             "protocol_rejections": self.protocol_rejections,
             "controller_failures": self.controller_failures,
+            "model_errors": self.model_errors,
+            "decision_timeouts": self.decision_timeouts,
+            "inference_busy": self.inference_busy,
+            "stale_notifications": self.stale_notifications,
             "completed_episodes": self.completed_episodes,
             "states_received": self.states_received,
+            "states_ignored": self.states_ignored,
             "max_event_loop_lag_ms": round(self.max_event_loop_lag_ms, 1),
             "superseded_states": self.superseded_states,
             "stale_decisions": self.stale_decisions,
@@ -542,6 +671,7 @@ async def run_server(args):
             "model_id": args.onnx_model_id,
             "label_source": args.onnx_label_source,
             "prompt_mode": args.kev_prompt,
+            "provider": args.onnx_provider,
         }
         decisions_config = {
             "url": args.decisions_url,
@@ -562,8 +692,15 @@ async def run_server(args):
             safety_fallback=args.safety_fallback,
             safety_threshold=args.safety_threshold,
             evaluation_mode=args.eval_mode,
+            live_mode=args.live_mode,
+            notify_stale=args.notify_stale,
+            metrics_out=args.metrics_out,
         )
-        await server.start()
+        try:
+            await server.start()
+        except Exception:
+            server.close()
+            raise
         lag_task = asyncio.create_task(server._lag_monitor())
         async with websockets.serve(
             server.handle_connection,
@@ -583,12 +720,10 @@ async def run_server(args):
                 # the socket before the game can connect.
                 await asyncio.Event().wait()
         lag_task.cancel()
+        server.close()
     result = server.metrics()
     print("LANESHIFT_METRICS " + json.dumps(result, separators=(",", ":")), flush=True)
-    if args.metrics_out:
-        output = Path(args.metrics_out)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    server.write_metrics()
 
 
 def parse_args(argv=None):
@@ -602,7 +737,11 @@ def parse_args(argv=None):
     parser.add_argument("--safety-threshold", type=float, default=0.55,
                         help="minimum max probability before the safety veto applies")
     parser.add_argument("--eval-mode", action="store_true",
-                        help="disable safety substitution; report model errors and apply only model actions")
+                        help="strict evaluation: no fallback, report model errors, apply only model actions")
+    parser.add_argument("--live-mode", action="store_true",
+                        help="continuous play: no safety substitution, report stale/busy decisions instead of acting on them")
+    parser.add_argument("--notify-stale", action="store_true",
+                        help="send a model_error when a decision's state is too old to use")
     parser.add_argument("--max-state-age", type=float, default=0.4,
                         help="how stale a decision's state may be, in seconds of simulation time, before it is discarded")
     parser.add_argument("--expected-episodes", type=int, default=0)
@@ -626,6 +765,8 @@ def parse_args(argv=None):
                         help="onnxruntime intra-op threads (0 = all cores)")
     parser.add_argument("--onnx-arena", action="store_true",
                         help="enable the ONNX Runtime CPU memory arena (faster, more RAM)")
+    parser.add_argument("--onnx-provider", choices=("cpu", "qnn", "dml"), default="cpu",
+                        help="ONNX Runtime execution provider; qnn/dml require a matching native ARM64 build")
     parser.add_argument("--onnx-model-id", default=os.getenv("LANESHIFT_ONNX_MODEL_ID", ""),
                         help="human-readable identity recorded for this ONNX checkpoint")
     parser.add_argument("--onnx-label-source", choices=("original_model", "fine_tuned_model"),

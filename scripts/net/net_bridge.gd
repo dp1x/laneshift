@@ -82,10 +82,10 @@ func _process(delta: float) -> void:
 	else:
 		reconnect_timer = 0.0
 
-func send_state(snapshot: Dictionary) -> void:
+func send_state(snapshot: Dictionary, decision_request: bool = true) -> void:
 	if not enabled or not connected_flag:
 		return
-	var msg := {"type": "state", "protocol_version": 1}
+	var msg := {"type": "state", "protocol_version": 1, "decision_request": decision_request}
 	for k in snapshot.keys():
 		msg[k] = snapshot[k]
 	outbound_queue.append(msg)
@@ -140,7 +140,7 @@ func _handle_message(text: String) -> void:
 			last_tick = max(last_tick, tick)
 			last_action_received_msec = Time.get_ticks_msec()
 			var label_source := String(msg.get("label_source", "external_ai"))
-			if label_source not in ["human", "rule_based", "original_model", "fine_tuned_model", "synthetic", "external_ai", "controller_fallback"]:
+			if label_source not in ["human", "rule_based", "safe_teacher", "original_model", "fine_tuned_model", "synthetic", "external_ai", "controller_fallback"]:
 				label_source = "external_ai"
 			emit_signal("action_received", action, dur, seq, tick, ep, label_source, decision_metadata)
 			_send({"type": "ack", "protocol_version": 1, "seq": seq, "status": "validated"})

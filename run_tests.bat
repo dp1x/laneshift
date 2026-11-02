@@ -18,6 +18,8 @@ godot --headless --path "%~dp0." --script res://tests/telemetry_flow_test.gd
 if errorlevel 1 exit /b 1
 godot --headless --path "%~dp0." --script res://tests/turn_based_test.gd
 if errorlevel 1 exit /b 1
+godot --headless --path "%~dp0." --script res://tests/live_decision_test.gd
+if errorlevel 1 exit /b 1
 godot --headless --path "%~dp0." --script res://tests/observation_test.gd
 if errorlevel 1 exit /b 1
 godot --headless --path "%~dp0." --script res://tests/human_schema_test.gd

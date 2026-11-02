@@ -3,6 +3,11 @@
 This is a small matched pilot, not a finished study. It exists to prove the
 measurement path and to establish a baseline before any fine-tuning.
 
+These numbers predate the single-inference-worker fix in the controller and the
+live-mode work. They remain a historical baseline; rerun the matched pilot with
+the current controller before using the latency or score figures in a new
+comparison.
+
 ## Conditions
 
 | Field | Value |

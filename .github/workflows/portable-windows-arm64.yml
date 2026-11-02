@@ -65,6 +65,7 @@ jobs:
             "res://tests/telemetry_test.gd",
             "res://tests/telemetry_flow_test.gd",
             "res://tests/turn_based_test.gd",
+            "res://tests/live_decision_test.gd",
             "res://tests/observation_test.gd",
             "res://tests/human_schema_test.gd",
             "res://tests/options_test.gd"

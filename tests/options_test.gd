@@ -27,6 +27,12 @@ func _test_option_values_survive_parsing() -> void:
 		"--max-stale-ticks=6000",
 		"--traffic-density=0.12",
 		"--decision-history-s=240",
+		"--live",
+		"--cycle-seeds",
+		"--decision-interval-s=2.5",
+		"--max-decision-age-s=4.5",
+		"--request-timeout-ms=21000",
+		"--inference-cooldown-ms=100",
 	])
 	var options: Dictionary = MainScript.parse_options(args)
 	_check(bool(options["auto_run"]), "auto-run flag should be recognised")
@@ -39,6 +45,12 @@ func _test_option_values_survive_parsing() -> void:
 	_check(int(options["max_stale_ticks"]) == 6000, "max-stale-ticks should parse")
 	_check(is_equal_approx(float(options["traffic_density"]), 0.12), "traffic-density should parse")
 	_check(is_equal_approx(float(options["decision_history_s"]), 240.0), "decision-history-s should parse")
+	_check(bool(options["live_mode"]), "live flag should be recognised")
+	_check(bool(options["cycle_seeds"]), "cycle-seeds flag should be recognised")
+	_check(is_equal_approx(float(options["live_decision_interval"]), 2.5), "live decision interval should parse")
+	_check(is_equal_approx(float(options["live_max_decision_age"]), 4.5), "max decision age should parse")
+	_check(int(options["live_request_timeout_ms"]) == 21000, "live request timeout should parse")
+	_check(int(options["live_inference_cooldown_ms"]) == 100, "inference cooldown should parse")
 
 func _test_defaults_are_sane() -> void:
 	var options: Dictionary = MainScript.parse_options(PackedStringArray(["--auto-run"]))
@@ -46,6 +58,9 @@ func _test_defaults_are_sane() -> void:
 	_check(int(options["external_timeout_ms"]) == 1500, "default control timeout should be 1500 ms")
 	_check(int(options["max_stale_ticks"]) == 30, "default staleness bound should be 30 ticks")
 	_check(is_equal_approx(float(options["traffic_density"]), -1.0), "traffic density should be unset by default")
+	_check(not bool(options["live_mode"]), "live mode should be off by default")
+	_check(is_equal_approx(float(options["live_decision_interval"]), 1.0), "live decision interval should default to 1 s")
+	_check(is_equal_approx(float(options["live_max_decision_age"]), 5.0), "max decision age should default to 5 s")
 
 func _check(condition: bool, message: String) -> void:
 	if not condition:

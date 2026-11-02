@@ -103,6 +103,39 @@ var turn_wait_started_msec: int = 0
 var turn_timeout_msec: int = 25000
 var turn_decision_count: int = 0
 
+# Continuous live mode: the simulation never waits for the model. At most one
+# decision request is outstanding, and a late answer is discarded rather than
+# applied to a state it no longer describes.
+var live_mode: bool = false
+var live_decision_interval: float = 1.0
+var live_max_decision_age: float = 5.0
+var live_request_timeout_msec: int = 25000
+var live_inference_cooldown_msec: int = 250
+var live_decision_timer: float = 0.0
+var live_request_pending: bool = false
+var live_request_state_id: String = ""
+var live_request_tick: int = -1
+var live_request_sim_time: float = 0.0
+var live_request_started_msec: int = 0
+var live_request_seq: int = 0
+var live_next_request_msec: int = 0
+var live_decisions_completed: int = 0
+var live_decisions_applied: int = 0
+var live_decisions_rejected: int = 0
+var live_decisions_stale: int = 0
+var live_decision_timeouts: int = 0
+var live_inference_errors: int = 0
+var live_last_action: String = ""
+var live_last_probability: float = 0.0
+var live_last_probabilities: Dictionary = {}
+var live_last_inference_ms: float = 0.0
+var live_last_decision_age: float = 0.0
+var live_last_action_msec: int = 0
+var live_last_resolution_msec: int = 0
+var live_status: String = "IDLE" # IDLE, THINKING, ACTION, STALE, REJECTED, TIMEOUT, ERROR, OFFLINE, ENDED
+var live_status_detail: String = ""
+var live_hud_timer: float = 0.0
+
 var control_mode: String = "human" # human, auto
 var external_control: bool = false
 
@@ -114,6 +147,7 @@ var auto_episodes_per_seed: int = 1
 var auto_episode_index: int = 0
 var auto_total_episodes: int = 0
 var auto_max_episodes: int = 0
+var cycle_seeds: bool = false
 var auto_running: bool = false
 var auto_episode_duration: float = 0.0
 var sim_speed_scale: float = 1.0
@@ -191,7 +225,18 @@ func _ready() -> void:
 			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 		else:
 			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_MAXIMIZED)
+		call_deferred("_print_window_diagnostics")
 	queue_redraw()
+
+func _print_window_diagnostics() -> void:
+	await get_tree().process_frame
+	print("LANESHIFT_WINDOW window=%s viewport=%s screen=%s mode=%d scale=%.2f" % [
+		DisplayServer.window_get_size(),
+		get_viewport().get_visible_rect().size,
+		DisplayServer.screen_get_size(),
+		DisplayServer.window_get_mode(),
+		get_viewport().get_final_transform().get_scale().x,
+	])
 
 func _parse_args() -> void:
 	var args := OS.get_cmdline_user_args()
@@ -205,9 +250,15 @@ func _parse_args() -> void:
 	evaluation_mode = bool(options["evaluation_mode"])
 	turn_decision_interval = float(options["turn_decision_interval"])
 	turn_timeout_msec = int(options["turn_timeout_ms"])
+	live_mode = bool(options["live_mode"]) and not turn_based
+	live_decision_interval = float(options["live_decision_interval"])
+	live_max_decision_age = float(options["live_max_decision_age"])
+	live_request_timeout_msec = int(options["live_request_timeout_ms"])
+	live_inference_cooldown_msec = int(options["live_inference_cooldown_ms"])
 	auto_seeds = options["seeds"]
 	auto_episodes_per_seed = int(options["episodes"])
 	auto_max_episodes = int(options["max_episodes"])
+	cycle_seeds = bool(options["cycle_seeds"])
 	auto_episode_duration = float(options["episode_duration"])
 	sim_speed_scale = float(options["sim_speed_scale"])
 	countdown_seconds = float(options["countdown"])
@@ -234,9 +285,15 @@ static func parse_options(args: PackedStringArray) -> Dictionary:
 		"evaluation_mode": false,
 		"turn_decision_interval": 1.0,
 		"turn_timeout_ms": 25000,
+		"live_mode": false,
+		"live_decision_interval": 1.0,
+		"live_max_decision_age": 5.0,
+		"live_request_timeout_ms": 25000,
+		"live_inference_cooldown_ms": 250,
 		"seeds": [],
 		"episodes": 1,
 		"max_episodes": 0,
+		"cycle_seeds": false,
 		"episode_duration": 0.0,
 		"sim_speed_scale": 1.0,
 		"countdown": 0.0,
@@ -271,6 +328,24 @@ static func parse_options(args: PackedStringArray) -> Dictionary:
 			continue
 		if arg == "--take-control-on-start":
 			options["take_control_on_start"] = true
+			continue
+		if arg == "--live":
+			options["live_mode"] = true
+			continue
+		if arg == "--cycle-seeds":
+			options["cycle_seeds"] = true
+			continue
+		if arg.begins_with("--decision-interval-s="):
+			options["live_decision_interval"] = clampf(float(arg.trim_prefix("--decision-interval-s=")), 0.1, 30.0)
+			continue
+		if arg.begins_with("--max-decision-age-s="):
+			options["live_max_decision_age"] = clampf(float(arg.trim_prefix("--max-decision-age-s=")), 0.1, 120.0)
+			continue
+		if arg.begins_with("--request-timeout-ms="):
+			options["live_request_timeout_ms"] = maxi(1000, int(arg.trim_prefix("--request-timeout-ms=")))
+			continue
+		if arg.begins_with("--inference-cooldown-ms="):
+			options["live_inference_cooldown_ms"] = clampi(int(arg.trim_prefix("--inference-cooldown-ms=")), 0, 10000)
 			continue
 		if arg == "--no-controller":
 			options["no_controller"] = true
@@ -1094,6 +1169,24 @@ func start_game(seed: int = -1, cfg: Dictionary = {}, requested_episode_id: Stri
 	turn_elapsed = turn_decision_interval
 	turn_decision_count = 0
 	turn_wait_started_msec = 0
+	live_request_pending = false
+	live_request_state_id = ""
+	live_request_tick = -1
+	live_request_sim_time = 0.0
+	live_request_started_msec = 0
+	live_next_request_msec = 0
+	# Let the first live decision happen on the first physics tick so Kev has a
+	# chance to act before the opening traffic reaches the bike.
+	live_decision_timer = live_decision_interval
+	live_status = "IDLE"
+	live_status_detail = ""
+	live_hud_timer = 0.0
+	live_last_action = ""
+	live_last_probability = 0.0
+	live_last_probabilities.clear()
+	live_last_inference_ms = 0.0
+	live_last_decision_age = 0.0
+	live_last_resolution_msec = 0
 	ai_history_actions.clear()
 	if ai_history != null:
 		ai_history.queue_redraw()
@@ -1106,6 +1199,8 @@ func start_game(seed: int = -1, cfg: Dictionary = {}, requested_episode_id: Stri
 	else:
 		_set_state("playing")
 	_update_ai_status()
+	if live_mode:
+		_update_live_hud(true)
 	telemetry_timer = 0.0
 	decision_timer = 0.0
 	queue_redraw()
@@ -1146,6 +1241,11 @@ func _on_vehicle_overtaken(vehicle_id: String) -> void:
 	_log_event("vehicle_overtaken", {"vehicle_id": vehicle_id, "score": sim.score})
 
 func _on_episode_ended(summary: Dictionary) -> void:
+	if live_mode:
+		live_request_pending = false
+		live_status = "ENDED"
+		live_status_detail = String(summary.get("termination_reason", ""))
+		_update_live_hud(true)
 	var terminal_state: Dictionary = sim.get_snapshot()
 	terminal_state["state_id"] = "%s:%d:terminal" % [sim.episode_id, sim.physics_tick]
 	terminal_state["snapshot_kind"] = "terminal"
@@ -1177,8 +1277,68 @@ func _on_scenario_init(info: Dictionary) -> void:
 	if telemetry != null:
 		_log_event("scenario_initialized", info)
 
+func _decision_probability(action: String, decision_metadata: Dictionary) -> float:
+	var probabilities = decision_metadata.get("probabilities", {})
+	if typeof(probabilities) == TYPE_DICTIONARY and probabilities.has(action):
+		return float(probabilities[action])
+	return float(decision_metadata.get("confidence", 0.0))
+
+func _mark_live_rejected(reason: String) -> void:
+	live_decisions_rejected += 1
+	live_status = "REJECTED"
+	live_status_detail = reason
+	_update_live_hud(true)
+
 func _on_net_action(action: String, duration: float, seq: int, tick: int, episode_id: String, label_source: String, decision_metadata: Dictionary) -> void:
 	var observed_state: Dictionary = _get_decision_state(tick)
+	var decision_age_s := -1.0
+	var request_started_msec := -1
+	if live_mode:
+		var matches_request := (
+			live_request_pending
+			and episode_id == sim.episode_id
+			and tick == live_request_tick
+		)
+		if not matches_request:
+			_log_event("external_action_ignored", {
+				"controller_seq": seq,
+				"requested_action": action,
+				"command_tick": tick,
+				"command_episode_id": episode_id,
+				"reason": "no_matching_live_request",
+				"decision_metadata": decision_metadata,
+			})
+			return
+		live_request_pending = false
+		live_next_request_msec = Time.get_ticks_msec() + live_inference_cooldown_msec
+		live_last_resolution_msec = Time.get_ticks_msec()
+		request_started_msec = live_request_started_msec
+		decision_age_s = maxf(0.0, sim.sim_time - live_request_sim_time)
+		live_last_decision_age = decision_age_s
+		live_decisions_completed += 1
+		live_last_action = action
+		live_last_probability = _decision_probability(action, decision_metadata)
+		var live_probs = decision_metadata.get("probabilities", {})
+		live_last_probabilities = live_probs if typeof(live_probs) == TYPE_DICTIONARY else {}
+		live_last_inference_ms = float(decision_metadata.get("model_latency_ms", 0.0))
+		if decision_age_s > live_max_decision_age:
+			live_decisions_stale += 1
+			live_status = "STALE"
+			live_status_detail = "decision arrived after %.1f s" % decision_age_s
+			_log_event("live_decision_dropped", {
+				"request_seq": live_request_seq,
+				"controller_seq": seq,
+				"state_id": live_request_state_id,
+				"command_tick": tick,
+				"decision_age_s": decision_age_s,
+				"max_decision_age_s": live_max_decision_age,
+				"requested_action": action,
+				"reason": "stale_observation",
+				"decision_metadata": decision_metadata,
+			})
+			_show_notice("KEV LATE: %.1f S" % decision_age_s)
+			_update_live_hud(true)
+			return
 	_log_event("external_action_received", {
 		"controller_seq": seq,
 		"command_episode_id": episode_id,
@@ -1187,13 +1347,16 @@ func _on_net_action(action: String, duration: float, seq: int, tick: int, episod
 		"requested_action": action,
 		"requested_duration": duration,
 		"label_source": label_source,
-		"decision_metadata": decision_metadata
+		"decision_metadata": decision_metadata,
+		"live_request_seq": live_request_seq if live_mode else -1,
+		"request_started_msec": request_started_msec,
+		"decision_age_s": decision_age_s,
 	})
-	_update_ai_panel(action, label_source, decision_metadata, tick)
 	if state != "playing":
 		_log_event("external_action_ignored", {"controller_seq": seq, "requested_action": action, "reason": "episode_not_playing", "decision_metadata": decision_metadata})
 		return
-	if (external_control or auto_run) and episode_id == sim.episode_id:
+	var accepts_external := external_control if live_mode else (external_control or auto_run)
+	if accepts_external and episode_id == sim.episode_id:
 		var decision_state: Dictionary = observed_state
 		if decision_state.is_empty():
 			_log_event("external_action_rejected", {
@@ -1203,6 +1366,8 @@ func _on_net_action(action: String, duration: float, seq: int, tick: int, episod
 				"decision_metadata": decision_metadata,
 				"reason": "decision_state_unavailable"
 			})
+			if live_mode:
+				_mark_live_rejected("decision_state_unavailable")
 			return
 		if action not in decision_state.get("legal_actions", []):
 			_log_event("external_action_rejected", {
@@ -1214,10 +1379,15 @@ func _on_net_action(action: String, duration: float, seq: int, tick: int, episod
 				"decision_metadata": decision_metadata,
 				"reason": "action_not_legal_in_decision_state"
 			})
+			if live_mode:
+				_mark_live_rejected("action_not_legal_in_decision_state")
 			return
-		var actual_source := label_source if label_source in ["rule_based", "original_model", "fine_tuned_model", "controller_fallback"] else "external_ai"
+		var actual_source := label_source if label_source in ["rule_based", "safe_teacher", "original_model", "fine_tuned_model", "controller_fallback"] else "external_ai"
 		last_external_action_msec = Time.get_ticks_msec()
-		var applied: bool = _submit_action(action, duration, actual_source, label_source, seq, tick, decision_state, decision_metadata)
+		var applied: bool = _submit_action(
+			action, duration, actual_source, label_source, seq, tick,
+			decision_state, decision_metadata, true, decision_age_s, request_started_msec
+		)
 		_log_event("external_action_applied" if applied else "external_action_rejected", {
 			"controller_seq": seq,
 			"requested_action": action,
@@ -1225,6 +1395,7 @@ func _on_net_action(action: String, duration: float, seq: int, tick: int, episod
 			"applied_action": action if applied else sim.current_action,
 			"accepted": applied,
 			"decision_metadata": decision_metadata,
+			"decision_age_s": decision_age_s,
 			"reason": "" if applied else "not_legal_at_application"
 		})
 		if applied and turn_based and turn_waiting:
@@ -1238,6 +1409,23 @@ func _on_net_action(action: String, duration: float, seq: int, tick: int, episod
 				"controller_seq": seq,
 			})
 			_show_notice("KEV: " + action)
+		if live_mode:
+			if applied:
+				live_decisions_applied += 1
+				live_status = "ACTION"
+				live_status_detail = ""
+				live_last_action_msec = Time.get_ticks_msec()
+				ai_history_actions.append(action)
+				while ai_history_actions.size() > 12:
+					ai_history_actions.pop_front()
+				if ai_history != null:
+					ai_history.queue_redraw()
+				_show_notice("KEV: " + action)
+			else:
+				_mark_live_rejected("not_legal_at_application")
+			_update_live_hud(true)
+		else:
+			_update_ai_panel(action, label_source, decision_metadata, tick)
 	else:
 		_log_event("external_action_ignored", {"controller_seq": seq, "requested_action": action, "reason": "human_control_active", "decision_metadata": decision_metadata})
 
@@ -1246,6 +1434,25 @@ func _on_command_rejected(seq: int, reason: String, episode_id: String, tick: in
 
 func _on_model_error(reason: String, episode_id: String, tick: int) -> void:
 	_log_event("model_error", {"reason": reason, "command_episode_id": episode_id, "command_tick": tick})
+	if live_mode:
+		# A model failure never ends a live episode and never becomes a rule
+		# action. Clear the matching request and schedule the next attempt.
+		if live_request_pending and episode_id == sim.episode_id and (tick < 0 or tick == live_request_tick):
+			live_request_pending = false
+			live_last_resolution_msec = Time.get_ticks_msec()
+			live_inference_errors += 1
+			live_status = "ERROR"
+			live_status_detail = reason
+			live_next_request_msec = Time.get_ticks_msec() + live_inference_cooldown_msec
+			_log_event("live_inference_error", {
+				"request_seq": live_request_seq,
+				"state_id": live_request_state_id,
+				"physics_tick": live_request_tick,
+				"reason": reason,
+			})
+			_show_notice("KEV ERROR: " + reason)
+			_update_live_hud(true)
+		return
 	_fail_turn("model_error:" + reason)
 
 func _on_net_reset(seed: int, cfg: Dictionary, episode_id: String) -> void:
@@ -1257,6 +1464,10 @@ func _on_net_reset(seed: int, cfg: Dictionary, episode_id: String) -> void:
 func _on_net_connected() -> void:
 	conn_label.text = "LOCAL · 8766"
 	_log_event("controller_connected", {})
+	if live_mode and live_status == "OFFLINE":
+		live_status = "READY"
+		live_status_detail = ""
+		_update_live_hud(true)
 	_update_ai_status()
 	_update_menu_status()
 
@@ -1266,12 +1477,17 @@ func _on_net_disconnected() -> void:
 		external_control = false
 		control_mode = "human"
 	_log_event("controller_disconnected", {})
+	if live_mode:
+		live_request_pending = false
+		live_status = "OFFLINE"
+		live_status_detail = "controller_disconnected"
+		_update_live_hud(true)
 	if turn_waiting:
 		_fail_turn("controller_disconnected")
 	_update_ai_status()
 	_update_menu_status()
 
-func _submit_action(action: String, duration: float, control_source: String, label_source: String, controller_seq: int = -1, state_tick: int = -1, decision_state: Dictionary = {}, decision_metadata: Dictionary = {}, count_action: bool = true) -> bool:
+func _submit_action(action: String, duration: float, control_source: String, label_source: String, controller_seq: int = -1, state_tick: int = -1, decision_state: Dictionary = {}, decision_metadata: Dictionary = {}, count_action: bool = true, decision_age_s: float = -1.0, request_started_msec: int = -1) -> bool:
 	var application_state: Dictionary = _observation_snapshot()
 	var state_before: Dictionary = decision_state.duplicate(true) if not decision_state.is_empty() else application_state
 	var decision_tick := int(state_before.get("physics_tick", state_tick if state_tick >= 0 else sim.physics_tick))
@@ -1295,6 +1511,9 @@ func _submit_action(action: String, duration: float, control_source: String, lab
 		"decision_sim_time": state_before.get("sim_time", sim.sim_time),
 		"application_sim_time": application_state.get("sim_time", sim.sim_time),
 		"controller_state_tick": state_tick if state_tick >= 0 else decision_tick,
+		"decision_age_s": decision_age_s,
+		"request_started_msec": request_started_msec,
+		"received_msec": Time.get_ticks_msec(),
 		"requested_action": action,
 		"requested_duration": duration,
 		"applied_action": applied_action,
@@ -1413,6 +1632,38 @@ func _physics_process(delta: float) -> void:
 		queue_redraw()
 		return
 	if state == "playing":
+		if live_mode:
+			_handle_human_input(delta)
+			sim.step(delta * sim_speed_scale)
+			_log_score_milestones(sim.score)
+			if sim.status != "running":
+				live_request_pending = false
+				live_status = "ENDED"
+				_update_hud()
+				_update_live_hud(true)
+				queue_redraw()
+				return
+			_sample_telemetry(delta)
+			# Stream current state so the controller can measure decision age
+			# and report staleness. These are not decision requests.
+			decision_timer += delta
+			if decision_timer >= 1.0 / decision_hz:
+				decision_timer = 0.0
+				var live_snap: Dictionary = _observation_snapshot()
+				live_snap["wall_time_unix"] = Time.get_unix_time_from_system()
+				live_snap["wall_time_monotonic_msec"] = Time.get_ticks_msec()
+				_remember_decision_state(live_snap)
+				net.update_state(live_snap)
+				net.send_state(live_snap, false)
+			live_decision_timer += delta * sim_speed_scale
+			_update_live_request()
+			live_hud_timer += delta
+			if live_hud_timer >= 0.1:
+				live_hud_timer = 0.0
+				_update_live_hud()
+			_update_hud()
+			queue_redraw()
+			return
 		if turn_based:
 			if turn_waiting:
 				if Time.get_ticks_msec() - turn_wait_started_msec > turn_timeout_msec:
@@ -1433,15 +1684,7 @@ func _physics_process(delta: float) -> void:
 				_update_hud()
 				queue_redraw()
 				return
-			if recording_active:
-				telemetry_timer += delta
-				if telemetry_timer >= 1.0 / telemetry_hz:
-					telemetry_timer = 0.0
-					var turn_snap: Dictionary = _observation_snapshot()
-					turn_snap["wall_time_unix"] = Time.get_unix_time_from_system()
-					turn_snap["wall_time_monotonic_msec"] = Time.get_ticks_msec()
-					if telemetry != null:
-						telemetry.log_telemetry(turn_snap)
+			_sample_telemetry(delta)
 			turn_elapsed += delta * sim_speed_scale
 			if turn_elapsed >= turn_decision_interval:
 				_begin_turn_decision()
@@ -1460,15 +1703,7 @@ func _physics_process(delta: float) -> void:
 			_update_hud()
 			queue_redraw()
 			return
-		if recording_active:
-			telemetry_timer += delta
-			if telemetry_timer >= 1.0 / telemetry_hz:
-				telemetry_timer = 0.0
-				var snap: Dictionary = _observation_snapshot()
-				snap["wall_time_unix"] = Time.get_unix_time_from_system()
-				snap["wall_time_monotonic_msec"] = Time.get_ticks_msec()
-				if telemetry != null:
-					telemetry.log_telemetry(snap)
+		_sample_telemetry(delta)
 		decision_timer += delta
 		if decision_timer >= 1.0 / decision_hz:
 			decision_timer = 0.0
@@ -1480,6 +1715,167 @@ func _physics_process(delta: float) -> void:
 			net.send_state(snap2)
 		_update_hud()
 	queue_redraw()
+
+func _sample_telemetry(delta: float) -> void:
+	if not recording_active or telemetry == null:
+		return
+	telemetry_timer += delta
+	if telemetry_timer < 1.0 / telemetry_hz:
+		return
+	telemetry_timer = 0.0
+	var snapshot: Dictionary = _observation_snapshot()
+	snapshot["wall_time_unix"] = Time.get_unix_time_from_system()
+	snapshot["wall_time_monotonic_msec"] = Time.get_ticks_msec()
+	telemetry.log_telemetry(snapshot)
+
+func _update_live_request() -> void:
+	if not live_mode or state != "playing":
+		return
+	if live_request_pending:
+		if Time.get_ticks_msec() - live_request_started_msec > live_request_timeout_msec:
+			_fail_live_request("decision_timeout")
+		return
+	if net == null or not net.connected_flag:
+		if live_status != "OFFLINE":
+			live_status = "OFFLINE"
+			live_status_detail = "controller_disconnected"
+			_update_live_hud(true)
+		return
+	if not external_control:
+		return
+	if Time.get_ticks_msec() < live_next_request_msec:
+		return
+	if live_decision_timer >= live_decision_interval:
+		_begin_live_decision()
+
+func _begin_live_decision() -> void:
+	if live_request_pending or net == null or not net.connected_flag:
+		return
+	var snapshot: Dictionary = _observation_snapshot()
+	snapshot["wall_time_unix"] = Time.get_unix_time_from_system()
+	snapshot["wall_time_monotonic_msec"] = Time.get_ticks_msec()
+	_remember_decision_state(snapshot)
+	net.update_state(snapshot)
+	net.send_state(snapshot, true)
+	live_request_pending = true
+	live_request_state_id = String(snapshot.get("state_id", ""))
+	live_request_tick = int(snapshot.get("physics_tick", -1))
+	live_request_sim_time = float(snapshot.get("sim_time", 0.0))
+	live_request_started_msec = Time.get_ticks_msec()
+	live_request_seq += 1
+	live_decision_timer = 0.0
+	live_status = "THINKING"
+	live_status_detail = ""
+	_log_event("live_decision_requested", {
+		"request_seq": live_request_seq,
+		"state_id": live_request_state_id,
+		"physics_tick": live_request_tick,
+		"sim_time": live_request_sim_time,
+		"decision_interval_s": live_decision_interval,
+		"max_decision_age_s": live_max_decision_age,
+	})
+	_update_live_hud(true)
+
+func _fail_live_request(reason: String) -> void:
+	if not live_request_pending:
+		return
+	var waited_ms := Time.get_ticks_msec() - live_request_started_msec
+	live_request_pending = false
+	live_last_resolution_msec = Time.get_ticks_msec()
+	live_decision_timeouts += 1
+	live_status = "TIMEOUT"
+	live_status_detail = reason
+	live_next_request_msec = Time.get_ticks_msec() + live_inference_cooldown_msec
+	_log_event("live_decision_timeout", {
+		"request_seq": live_request_seq,
+		"state_id": live_request_state_id,
+		"physics_tick": live_request_tick,
+		"sim_time": live_request_sim_time,
+		"waited_ms": waited_ms,
+		"reason": reason,
+	})
+	_show_notice("KEV TIMEOUT: %.1f S" % (float(waited_ms) / 1000.0))
+	_update_live_hud(true)
+
+func _update_live_hud(force: bool = false) -> void:
+	if not live_mode or ai_state_label == null:
+		return
+	if not force and state != "playing" and state != "gameover":
+		return
+	var now := Time.get_ticks_msec()
+	var text := "● IDLE"
+	var color := UI_MUTED
+	match live_status:
+		"THINKING":
+			text = "● THINKING %.1fS" % (float(now - live_request_started_msec) / 1000.0)
+			color = UI_ACCENT
+		"ACTION":
+			text = "● ACTION"
+			color = UI_ACCENT
+		"STALE":
+			text = "● STALE %.1fS" % live_last_decision_age
+			color = UI_WARN
+		"REJECTED":
+			text = "● REJECTED"
+			color = UI_WARN
+		"TIMEOUT":
+			text = "● TIMEOUT"
+			color = UI_DANGER
+		"ERROR":
+			text = "● ERROR"
+			color = UI_DANGER
+		"OFFLINE":
+			text = "● OFFLINE"
+			color = UI_WARN
+		"ENDED":
+			text = "● RUN ENDED"
+			color = UI_MUTED
+		_:
+			text = "● READY"
+			color = UI_MUTED
+	ai_state_label.text = text
+	ai_state_label.add_theme_color_override("font_color", color)
+	ai_model_label.text = "KEV-ONNX · 0.8B · LIVE"
+	ai_action_label.text = live_last_action if live_last_action != "" else "--"
+	ai_prob_label.text = ("%d%%" % int(round(live_last_probability * 100.0))) if live_last_action != "" else ""
+	var ago_text := "--"
+	if live_last_resolution_msec > 0:
+		ago_text = "%.1f S" % (float(now - live_last_resolution_msec) / 1000.0)
+	var drop_counts := ""
+	if live_decisions_stale > 0 or live_decisions_rejected > 0:
+		drop_counts = "  ·  STALE %d  REJ %d" % [live_decisions_stale, live_decisions_rejected]
+	ai_latency_label.text = "INFER %.2f S  ·  AGE %.2f S  ·  AGO %s%s" % [
+		live_last_inference_ms / 1000.0,
+		live_last_decision_age,
+		ago_text,
+		drop_counts,
+	]
+	var failures := live_decision_timeouts + live_inference_errors
+	var episode_number := maxi(1, auto_episode_index + 1)
+	var episode_text := "SEED %d  ·  EP %d" % [sim.seed_value, episode_number]
+	if auto_total_episodes > 0 and auto_total_episodes <= 9999:
+		episode_text = "SEED %d  ·  EP %d/%d" % [sim.seed_value, mini(episode_number, auto_total_episodes), auto_total_episodes]
+	conn_label.text = "%s  ·  %.1f S  ·  DEC %d  ·  OK %d  ·  FAIL %d  ·  TO %d" % [
+		episode_text,
+		sim.sim_time,
+		live_decisions_completed,
+		live_decisions_applied,
+		failures,
+		live_decision_timeouts,
+	]
+	if not live_last_probabilities.is_empty():
+		ai_distribution_label.text = "L %d   S %d   R %d   B %d" % [
+			int(round(float(live_last_probabilities.get("LEFT", 0.0)) * 100.0)),
+			int(round(float(live_last_probabilities.get("STAY", 0.0)) * 100.0)),
+			int(round(float(live_last_probabilities.get("RIGHT", 0.0)) * 100.0)),
+			int(round(float(live_last_probabilities.get("BRAKE", 0.0)) * 100.0)),
+		]
+	elif live_status_detail != "":
+		ai_distribution_label.text = live_status_detail.to_upper()
+	else:
+		ai_distribution_label.text = ""
+	if ai_history != null:
+		ai_history.queue_redraw()
 
 func _begin_turn_decision() -> void:
 	if not turn_based or state != "playing" or turn_waiting:
@@ -1888,9 +2284,14 @@ func _start_auto_run() -> void:
 	auto_running = true
 	auto_episode_index = 0
 	start_recording()
-	auto_total_episodes = auto_seeds.size() * auto_episodes_per_seed
-	if auto_max_episodes > 0:
-		auto_total_episodes = min(auto_total_episodes, auto_max_episodes)
+	if cycle_seeds:
+		# Live demo: use the next seed each episode and keep going until the
+		# window closes (or an explicit --max-episodes budget is reached).
+		auto_total_episodes = auto_max_episodes if auto_max_episodes > 0 else 1000000
+	else:
+		auto_total_episodes = auto_seeds.size() * auto_episodes_per_seed
+		if auto_max_episodes > 0:
+			auto_total_episodes = min(auto_total_episodes, auto_max_episodes)
 	_auto_start_next()
 
 func _auto_start_next() -> void:
@@ -1898,8 +2299,12 @@ func _auto_start_next() -> void:
 		auto_running = false
 		_finish_auto_run()
 		return
-	var seed_idx := auto_episode_index / auto_episodes_per_seed
-	var seed: int = auto_seeds[seed_idx % auto_seeds.size()]
+	var seed: int
+	if cycle_seeds:
+		seed = auto_seeds[auto_episode_index % auto_seeds.size()]
+	else:
+		var seed_idx := auto_episode_index / auto_episodes_per_seed
+		seed = auto_seeds[seed_idx % auto_seeds.size()]
 	var cfg := DEFAULT_CONFIG.duplicate(true)
 	if auto_episode_duration > 0.0:
 		cfg["episode_duration"] = auto_episode_duration

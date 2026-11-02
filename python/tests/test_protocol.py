@@ -1,6 +1,9 @@
 import unittest
 import asyncio
 import json
+import tempfile
+import threading
+from pathlib import Path
 
 from policy import PolicyDecision
 from server import ALLOWED_ACTIONS, ControllerServer, load_policy, make_action_message, parse_args, validate_state_message
@@ -39,6 +42,29 @@ class SlowPolicy:
 
     async def choose_action(self, _state):
         await asyncio.sleep(0.05)
+        return "LEFT"
+
+
+class BlockingPolicy:
+    """A synchronous policy that holds the inference worker open."""
+
+    label_source = "original_model"
+
+    def __init__(self):
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self.active = 0
+        self.max_active = 0
+        self._lock = threading.Lock()
+
+    def choose_action(self, _state):
+        with self._lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+        self.started.set()
+        self.release.wait(timeout=2.0)
+        with self._lock:
+            self.active -= 1
         return "LEFT"
 
 
@@ -185,6 +211,96 @@ class ProtocolTests(unittest.TestCase):
 
         self.assertEqual(socket.messages, [])
         self.assertEqual(server.stale_decisions, 1)
+
+    def test_non_decision_state_updates_latest_without_queueing(self):
+        server = ControllerServer("dummy")
+        queue = asyncio.Queue(maxsize=1)
+        latest = {}
+        update = sample_state()
+        update["decision_request"] = False
+        self.assertEqual(server._accept_state(update, queue, latest), "ignored")
+        self.assertTrue(queue.empty())
+        self.assertEqual(server.states_ignored, 1)
+        self.assertEqual(latest["state"]["physics_tick"], 42)
+
+        request = sample_state()
+        request["physics_tick"] = 43
+        request["state_id"] = "ep-test:43"
+        self.assertEqual(server._accept_state(request, queue, latest), "queued")
+        self.assertEqual(queue.qsize(), 1)
+        self.assertEqual(server.decision_requests, 1)
+
+        invalid = sample_state()
+        invalid.pop("episode_id")
+        self.assertEqual(server._accept_state(invalid, queue, latest), "invalid")
+
+    def test_live_mode_reports_timeout_and_never_sends_a_fallback(self):
+        server = ControllerServer("rule_based", decision_timeout=0.005, live_mode=True)
+        server.policy = SlowPolicy()
+        socket = CaptureSocket()
+
+        asyncio.run(server._handle_state(socket, sample_state()))
+
+        self.assertEqual(len(socket.messages), 1)
+        self.assertEqual(socket.messages[0]["type"], "model_error")
+        self.assertEqual(socket.messages[0]["reason"], "decision_timeout")
+        metrics = server.metrics()
+        self.assertEqual(metrics["decisions"], 0)
+        self.assertEqual(metrics["decision_timeouts"], 1)
+        self.assertTrue(metrics["live_mode"])
+
+    def test_live_mode_disables_safety_substitution(self):
+        server = ControllerServer("rule_based", safety_fallback=True, live_mode=True)
+        self.assertIsNone(server.safety_policy)
+
+    def test_evaluation_mode_reports_timeout_and_never_sends_a_fallback(self):
+        server = ControllerServer("rule_based", decision_timeout=0.005, evaluation_mode=True)
+        server.policy = SlowPolicy()
+        socket = CaptureSocket()
+
+        asyncio.run(server._handle_state(socket, sample_state()))
+
+        self.assertEqual(socket.messages[0]["type"], "model_error")
+        self.assertEqual(socket.messages[0]["reason"], "decision_timeout")
+
+    def test_metrics_are_written_on_demand_for_a_disconnect(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "metrics.json"
+            server = ControllerServer("dummy", metrics_out=path)
+            server._handle_event({"type": "episode_end", "termination_reason": "timeout"})
+            server.write_metrics()
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["policy"], "dummy")
+            self.assertEqual(payload["completed_episodes"], 1)
+            self.assertEqual(payload["decisions"], 0)
+
+    def test_single_inference_worker_refuses_an_overlapping_decision(self):
+        async def run():
+            server = ControllerServer("rule_based", decision_timeout=5.0, live_mode=True)
+            policy = BlockingPolicy()
+            server.policy = policy
+            socket = CaptureSocket()
+            first = sample_state()
+            second = sample_state()
+            second["physics_tick"] = 43
+            second["state_id"] = "ep-test:43"
+
+            first_task = asyncio.create_task(server._handle_state(socket, first))
+            while not policy.started.is_set():
+                await asyncio.sleep(0.01)
+            second_task = asyncio.create_task(server._handle_state(socket, second))
+            await asyncio.sleep(0.05)
+            policy.release.set()
+            await asyncio.gather(first_task, second_task)
+            server.close()
+            return server, policy, socket
+
+        server, policy, socket = asyncio.run(run())
+
+        self.assertEqual(policy.max_active, 1)
+        self.assertEqual(server.inference_busy, 1)
+        self.assertTrue(any(message.get("type") == "model_error" for message in socket.messages))
+        self.assertTrue(any(message.get("type") == "action" for message in socket.messages))
 
 
 if __name__ == "__main__":

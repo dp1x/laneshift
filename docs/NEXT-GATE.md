@@ -15,9 +15,12 @@ human.
   0.4426 macro-F1, 0.3587 log loss, 0.1763 Brier and 0.0671 ECE. The balanced
   variant reached 0.8728 accuracy and 0.5574 macro-F1. These are imitation
   metrics, not driving results.
-- The released Kev checkpoint is slow and uncertain. On `C:` it is about
-  1.4-2.0 s per decision; pure Kev still chooses `STAY` at roughly 38-41%.
-  The watch-mode safety layer is what keeps the car alive.
+- The released Kev checkpoint is slow and uncertain. In the guest VM,
+  serialized four-thread inference measured 2.0-3.1 s per decision in live
+  play and 3.66 s mean isolated. Native ARM64 in the same guest measured 2.60 s
+  live and 3.21 s isolated. Pure Kev still chooses `STAY` at roughly 30-41%.
+  The watch-mode safety layer is what kept the car alive in the earlier sweep;
+  live mode has no such layer and records Kev's own outcomes.
 
 ## Decisions that need a human
 

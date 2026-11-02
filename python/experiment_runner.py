@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 
-BASELINE_POLICIES = {"dummy", "rule_based"}
+BASELINE_POLICIES = {"dummy", "rule_based", "safe_teacher"}
 MODEL_LABEL_SOURCES = {"original_model", "fine_tuned_model"}
 
 
