@@ -1,0 +1,64 @@
+{
+  "dataset": "laneshift-pilot-v1",
+  "label_type": "RULE-GENERATED",
+  "human_data": false,
+  "label_source": "rule_based",
+  "policy": "rule_based",
+  "rows": 1348,
+  "episodes": 15,
+  "scenario_seeds": [3, 7, 11, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67],
+  "splits": {
+    "train": [11, 19, 23, 31, 37, 43, 47, 53, 67],
+    "validation": [3, 41, 59],
+    "test": [7, 29, 61]
+  },
+  "conditions": {
+    "episode_duration_s": 30.0,
+    "traffic_density": 1.5,
+    "sim_speed_scale": 2.0,
+    "decision_cadence_hz": 10,
+    "telemetry_cadence_hz": 30
+  },
+  "source_session": "session_20261101_144044_173",
+  "source_recording_path": ".portable-dev/recordings/session_20261101_144044_173",
+  "source_code_commit": "630a9f93544ea03f1e91003ef6bf579294c8bfc0",
+  "source_code_dirty": true,
+  "action_counts": {
+    "STAY": 1192,
+    "BRAKE": 111,
+    "LEFT": 24,
+    "RIGHT": 21
+  },
+  "files": {
+    "decisions.jsonl": {
+      "bytes": 1695697,
+      "sha256": "a4ff7096590b1e59ac635f086b546bf733eb9689d581517f51acce79d6903ce1"
+    },
+    "decisions.csv": {
+      "bytes": 466203,
+      "sha256": "03f28210ba4bbd3c433e88dc6427abf12e334b895f2d32c68f1430193c8f516e"
+    },
+    "decisions.card.json": {
+      "bytes": 5070,
+      "sha256": "8412a745504990908dbc8720b634d15b27c391ea284a1fb692f41521588bbb43"
+    },
+    "pilot-15x30.csv": {
+      "bytes": 985,
+      "sha256": "e7f5571577647de229c3be430047c9619dc96b18eaeaa0f6412cee2577a4cac6"
+    },
+    "pilot-15x30.episodes.jsonl": {
+      "bytes": 5715,
+      "sha256": "d75a6c990b5c06e7135a57c6bff074dbceedf8bc46ba860662776062b3df2ea8"
+    },
+    "pilot-15x30.rule_based.metrics.json": {
+      "bytes": 960,
+      "sha256": "80016af51e3fec5892a6700fa958688a52d5979c1e4462088e041fbdacfeb0ea"
+    }
+  },
+  "notes": [
+    "RULE-GENERATED: no human demonstrations are present.",
+    "The teacher is a weak deterministic script; its labels are not safety ground truth.",
+    "Splits are grouped by whole scenario seed, never by adjacent rows.",
+    "The original recording remains local and gitignored; this directory is the canonical portable dataset."
+  ]
+}
