@@ -172,12 +172,67 @@ class SceneObservationTests(unittest.TestCase):
         observation = scene_observation(data)
         text = render_scene_state(observation)
         self.assertNotIn("close abs type", text)
+        self.assertIn("X0", text)
         on_start = text.splitlines().index("ON")
         off_start = text.splitlines().index("OFF")
         on_rows = [line for line in text.splitlines()[on_start + 1:off_start] if line != "none"]
         self.assertEqual(len(on_rows), 9)
         self.assertEqual(len({row["vehicle_id"] for row in observation["on_screen"]}), 9)
         self.assertEqual(len(observation["on_screen"]), 9)
+
+    def test_more_than_the_limit_is_explicitly_counted(self):
+        data = state()
+        data["traffic"] = [
+            {"id": f"v{i}", "lane": i % 3, "relative_distance_z": 5.0 + i * 6.0,
+             "relative_speed_z": 2.0, "speed": 18.0, "on_screen": True,
+             "type": "car", "length": 4.5, "width": 1.8}
+            for i in range(12)
+        ]
+        observation = scene_observation(data)
+        text = render_scene_state(observation)
+        lines = text.splitlines()
+        on_start = lines.index("ON")
+        off_start = lines.index("OFF")
+        on_rows = [line for line in lines[on_start + 1:off_start] if line != "none"]
+        self.assertEqual(len(on_rows), 9)
+        self.assertIn("X3", text)
+        self.assertEqual(len(observation["on_screen"]), 12)
+
+    def test_controlled_scene_changes_are_represented(self):
+        def render(traffic):
+            data = state()
+            data["traffic"] = traffic
+            return render_scene_state(scene_observation(data))
+
+        def vehicle(lane, distance, relative_speed, kind="car"):
+            return {
+                "id": f"{kind}-{lane}-{distance}", "lane": lane,
+                "relative_distance_z": distance, "relative_speed_z": relative_speed,
+                "speed": 18.0, "on_screen": True, "type": kind,
+                "length": 7.0 if kind == "truck" else 4.5,
+                "width": 2.4 if kind == "truck" else 1.8,
+            }
+
+        open_text = render([])
+        center_blocked = render([vehicle(1, 10.0, 6.0, "truck")])
+        left_safe = render([vehicle(1, 16.0, 3.0), vehicle(2, 9.0, 7.0)])
+        right_safe = render([vehicle(1, 16.0, 3.0), vehicle(0, 9.0, 7.0)])
+        rear = render([vehicle(1, -10.0, -8.0)])
+        two_center = render([vehicle(1, 8.0, 6.0), vehicle(1, 24.0, 2.0)])
+
+        self.assertIn("ON\nnone", open_text)
+        self.assertEqual(open_text.splitlines()[-1], "L0/0 C0/0 R0/0 X0")
+        self.assertIn("C+10 +6 18 t", center_blocked)
+        self.assertIn("C1/0", center_blocked)
+        self.assertIn("C+16 +3 18 c", left_safe)
+        self.assertIn("R+9 +7 18 c", left_safe)
+        self.assertNotIn("L+", left_safe)
+        self.assertIn("L+9 +7 18 c", right_safe)
+        self.assertIn("C-10 +8 18 c", rear)
+        self.assertIn("C0/1", rear)
+        self.assertEqual(two_center.count("C+"), 2)
+        self.assertNotEqual(open_text, center_blocked)
+        self.assertNotEqual(left_safe, right_safe)
 
 
 if __name__ == "__main__":

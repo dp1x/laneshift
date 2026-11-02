@@ -97,12 +97,8 @@ class KevAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         request = captured[0]
         self.assertEqual(request["model"], "kev-latest")
-        self.assertEqual(request["state"]["episode_id"], "ep-44-2")
-        self.assertEqual(request["state"]["sim_time_s"], 2.0)
-        self.assertEqual(request["state"]["player"]["lane"], 1)
-        self.assertEqual(request["state"]["player"]["speed"], 24.0)
-        self.assertEqual(request["state"]["traffic"][0]["relative_distance"], 12.0)
-        self.assertEqual(request["state"]["traffic"][0]["relative_speed"], 5.0)
+        self.assertTrue(request["state"].startswith("c1\nP 1 1 24 0"))
+        self.assertIn("V 1 +12 +5 1 2.4", request["state"])
         question = request["questions"]["next_action"]
         self.assertEqual(question["type"], "choice")
         self.assertEqual(set(question["criteria"]), {"LEFT", "STAY", "BRAKE"})
@@ -186,7 +182,7 @@ class KevAdapterTests(unittest.IsolatedAsyncioTestCase):
             await policy.start()
             with self.assertRaisesRegex(KevInferenceError, "Kev System One request failed") as caught:
                 await policy.choose_action(sample_state())
-            self.assertEqual(caught.exception.details["request_payload"]["state"]["episode_id"], "ep-44-2")
+            self.assertTrue(caught.exception.details["request_payload"]["state"].startswith("c1\nP 1 1 24 0"))
             self.assertIsNone(caught.exception.details["response_payload"])
 
     async def test_invalid_probability_distribution_is_rejected(self):

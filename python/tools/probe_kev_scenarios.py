@@ -80,7 +80,7 @@ async def main() -> None:
         await policy.start()
         print(f"\n=== {name} ===", flush=True)
         for label, probe_state, expected in SCENARIOS:
-            decision = await policy.choose_action(probe_state)
+            decision = policy.choose_action(probe_state)
             probs = {k: round(v, 3) for k, v in decision.probabilities.items()}
             print(json.dumps({
                 "scenario": label,

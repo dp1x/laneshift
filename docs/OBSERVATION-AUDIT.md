@@ -8,6 +8,16 @@ Observation schema: **2**. Human recordings made with schema 1 remain raw and
 are excluded from v2 training by `python/export_human_decisions.py` unless
 `--allow-legacy` is passed explicitly.
 
+> **Update 2026-11-02 (L256 budget):** the structured scene observation still
+> retains every active vehicle, but the prompt is capped at nine
+> safety-relevant records: nearest ahead/behind per lane, then nearest by
+> distance. The final `X<n>` field is the number of relevant vehicles omitted
+> from the text. On the 1,348 pilot decisions this removed all 77 L256
+> overflows; the largest prompt was 253 total tokens. The legacy compact prompt
+> is now the short `c1` / `P` / `V` renderer (maximum 125 total tokens), not the
+> old YAML, and it no longer slices the state. The token numbers in the
+> historical sections below describe the pre-cap audit.
+
 ## 1. What the game actually does
 
 ### 1.1 Road and lanes
@@ -141,7 +151,7 @@ but is not repeated in the compact prompt text.
 | acceleration | yes (constant 0) | no | no | object `acceleration_mps2` | m/s² | yes | `simulation.gd:292-296` |
 | braking | not modelled | no | no | no | - | - | traffic has no controller |
 | lane change state | not modelled | no | no | no | - | - | traffic keeps its lane |
-| type | yes | yes | no | prompt `c`/`k`; object | car/truck | yes | `simulation.gd:129` |
+| type | yes | yes | no | prompt `c`/`t`; object | car/truck | yes | `simulation.gd:129` |
 | length | yes | yes | no | object `length_m` | m | yes | `simulation.gd:130` |
 | width | yes | yes | no | object `width_m` | m | yes | `simulation.gd:131` |
 | on-screen | renderer rule | yes | no | prompt section `ON`/`OFF`; object | bool | yes | `main.gd:1328-1336` |
@@ -240,14 +250,14 @@ Each vehicle record contains: label, vehicle id, lane, signed relative
 distance, signed engine relative speed, closing speed, absolute speed,
 acceleration, type, length, width, on-screen, ahead, and time to collision.
 
-### 4.2 Compact prompt
+### 4.2 Scene prompt
 
 The prompt is a table with an explicit version and section labels:
 
 ```text
 v2
 P C C 20 3 0 0 100 0 0 S
-V laneDZ close abs type; +ahead -behind +closing; c car k truck
+V laneDZ close abs type; +ahead -behind +closing; c car t truck
 ON
 L+33 +7 13 t
 R+47 +2 18 c
@@ -255,7 +265,7 @@ R+51 +6 14 t
 R+69 +2 18 t
 OFF
 none
-L1/0 C0/0 R3/0
+L1/0 C0/0 R3/0 X0
 ```
 
 Field order and units:
@@ -265,26 +275,30 @@ Field order and units:
   progress is 0-100; `rem` is a 15 m/s estimate.
 - Vehicle row: `lane` immediately followed by the signed gap in metres,
   then closing speed in m/s, then absolute speed in m/s (rich mode), then
-  `c` (car) or `k` (truck).
+  `c` (car) or `t` (truck).
 - `+ahead -behind`: signed gap is `vehicle.z - player.z`.
 - `+closing`: positive means the absolute gap is shrinking, from either
   side. Negative means the vehicle and player are separating.
 - `ON`: drawn by the renderer at this snapshot (`-12 <= z_rel <= 110`).
 - `OFF`: active, outside the draw gate, and inside `[-15, 160]` m.
-- Last line: `L ahead/behind counts`, `C ...`, `R ...`, built only from
-  included records.
+- Last line: `L ahead/behind counts`, `C ...`, `R ...`, built from all
+  included records, followed by `X<n>`, the number of relevant records omitted
+  from the prompt. The lane counts can therefore exceed the listed rows.
+- The prompt lists at most nine records. It keeps the nearest ahead and behind
+  vehicle in every lane, then fills remaining slots by on-screen status and
+  absolute distance. The structured object still has every vehicle.
 
 The prompt has two token modes:
 
-- **Rich**: up to 7 included vehicles; includes absolute speed.
-- **Dense**: 8 or more included vehicles; omits absolute speed from the text
-  to keep all vehicles. The structured object still has absolute speed for
-  every record. Both modes use the same field semantics and section labels.
+- **Rich**: up to 7 selected vehicles; includes absolute speed.
+- **Dense**: 8 or 9 selected vehicles; omits absolute speed from the text.
+  Both modes use the same field semantics and section labels.
 
-The token budget is 102 branch tokens, leaving 153 state tokens in the L256
-graph. Measured state tokens: 66 (open road), 85 (2 vehicles), 107 (4),
-120 (5), 151 (11 records, dense). A 12-record prompt does not fit and the
-controller raises an explicit error instead of dropping a vehicle.
+The L256 graph leaves 154-168 state tokens depending on the option branch.
+Measured state tokens on the pilot: 101-153 after the cap, and the largest total
+prompt is 253 tokens. The 77 states that previously exceeded the budget now
+list nine records plus `X<n>`; none raise. The legacy compact prompt uses a
+short `c1` / `P` / `V` format and peaks at 125 total tokens.
 
 ### 4.3 Visibility rules
 
@@ -370,7 +384,7 @@ New scene prompt (108 tokens, no truncation):
 ```text
 v2
 P C C 20 3 0 0 100 0 0 S
-V laneDZ close abs type; +ahead -behind +closing; c car k truck
+V laneDZ close abs type; +ahead -behind +closing; c car t truck
 ON
 L+33 +7 13 t
 R+47 +2 18 c
@@ -378,7 +392,7 @@ R+51 +6 14 t
 R+69 +2 18 t
 OFF
 none
-L1/0 C0/0 R3/0
+L1/0 C0/0 R3/0 X0
 ```
 
 The old prompt represents 2 of 4 rendered vehicles and loses its tail to
@@ -393,8 +407,9 @@ signed gap, closing speed, absolute speed, and type, plus per-lane occupancy.
 - After: scene prompt 86-120 tokens on the same 12 states; 96-111 tokens in a
   live 5-vehicle scene. No truncation.
 - Controlled scene token counts: 66 (open road), 85 (2), 107 (4), 120 (5),
-  151 (11 records dense). A 12-record state raises
-  `scene observation needs ... state tokens` instead of dropping a row.
+  151 (11 records dense). After the 2026-11-02 cap, dense states list nine
+  records plus `X<n>`; the largest of the 1,348 pilot prompts is 253 total
+  tokens. A 20-record state lists nine and reports the remaining eleven.
 - Side-by-side ONNX runs on the same 10 states: scene 81.3 mean state tokens
   versus lane 142.8. Mean latency was 1.67 s for scene and 1.58 s for lane in
   one run; a later run measured 2.55 s versus 2.90 s. The host is a 16 GB

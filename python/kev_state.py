@@ -29,6 +29,17 @@ KEV_LANE_INSTRUCTIONS = (
     "Brake when no lane change is safe. Choose exactly one legal option."
 )
 
+KEV_COMPACT_INSTRUCTIONS = (
+    "Choose the safest useful next action from the currently legal choices. "
+    "Only select an option present in criteria."
+)
+
+# The L256 graph leaves 154-168 tokens for the scene state, depending on the
+# option branch. Nine vehicles plus the headers fit with margin; the renderer
+# keeps the nearest ahead/behind vehicle in every lane and records how many
+# relevant vehicles were omitted instead of silently dropping them.
+SCENE_VEHICLE_LIMIT = 9
+
 ACTION_CRITERIA_LANE = {
     "LEFT": "Move left only if the left lane has safe front and rear clearance.",
     "STAY": "Stay only if the current lane is safe and changing lanes adds risk.",
@@ -372,16 +383,75 @@ def scene_observation(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def render_scene_state(observation: dict[str, Any]) -> str:
+def select_scene_records(
+    observation: dict[str, Any], vehicle_limit: int = SCENE_VEHICLE_LIMIT
+) -> tuple[list[dict[str, Any]], int]:
+    """Choose the safety-relevant vehicles that fit the fixed prompt.
+
+    The structured observation keeps every vehicle. The prompt keeps the
+    nearest ahead and behind vehicle in each lane, then fills remaining slots
+    by on-screen status and absolute distance. The returned count says how
+    many relevant vehicles were left out; the renderer prints it as ``X<n>``.
+    """
+    limit = max(1, int(vehicle_limit))
+    records = list(observation["on_screen"]) + list(observation["off_screen"])
+    if len(records) <= limit:
+        return records, 0
+
+    selected: list[dict[str, Any]] = []
+    seen: set[int] = set()
+
+    def add(record: dict[str, Any]) -> None:
+        key = id(record)
+        if key not in seen:
+            seen.add(key)
+            selected.append(record)
+
+    for lane in ("LEFT", "CENTER", "RIGHT"):
+        lane_records = [record for record in records if record.get("lane") == lane]
+        ahead = [record for record in lane_records if record["relative_distance_z"] >= 0.0]
+        behind = [record for record in lane_records if record["relative_distance_z"] < 0.0]
+        if ahead:
+            add(min(ahead, key=lambda record: record["relative_distance_z"]))
+        if behind:
+            add(max(behind, key=lambda record: record["relative_distance_z"]))
+
+    for record in sorted(records, key=lambda record: (not record["on_screen"], abs(record["relative_distance_z"]))):
+        if len(selected) >= limit:
+            break
+        add(record)
+
+    selected = selected[:limit]
+    order = {id(record): index for index, record in enumerate(records)}
+    selected.sort(key=lambda record: order[id(record)])
+    return selected, len(records) - len(selected)
+
+
+def scene_prompt_metadata(
+    observation: dict[str, Any], vehicle_limit: int = SCENE_VEHICLE_LIMIT
+) -> dict[str, int]:
+    selected, omitted = select_scene_records(observation, vehicle_limit)
+    return {
+        "vehicle_limit": int(vehicle_limit),
+        "vehicles_rendered": len(selected),
+        "vehicles_omitted": omitted,
+    }
+
+
+def render_scene_state(
+    observation: dict[str, Any], vehicle_limit: int = SCENE_VEHICLE_LIMIT
+) -> str:
     """Compact text for the fixed-size model context.
 
-    The full observation object retains every field for audit and training
-    metadata. This render keeps one line per vehicle so every visible vehicle
-    fits without silent truncation. See python/tools/measure_scene_latency.py for
-    the token check against the L256 graph.
+    The prompt is capped at ``vehicle_limit`` records. The full observation
+    object retains every field and vehicle for audit and training metadata; the
+    final ``X<n>`` field makes the omitted relevant vehicles explicit.
     """
+    selected, omitted = select_scene_records(observation, vehicle_limit)
+    on_screen = [record for record in selected if record["on_screen"]]
+    off_screen = [record for record in selected if not record["on_screen"]]
     player = observation["player"]
-    include_absolute = len(observation["on_screen"]) + len(observation["off_screen"]) <= 7
+    include_absolute = len(selected) <= 7
 
     def short(value: float) -> str:
         text = f"{float(value):.2f}".rstrip("0").rstrip(".")
@@ -402,9 +472,9 @@ def render_scene_state(observation: dict[str, Any]) -> str:
             short(player["lane_change_cooldown_s"]),
             player["previous_action"][0],
         ),
-        "V laneDZ close abs type; +ahead -behind +closing; c car k truck"
+        "V laneDZ close abs type; +ahead -behind +closing; c car t truck"
         if include_absolute else
-        "V laneDZ close type; +ahead -behind +closing; c car k truck",
+        "V laneDZ close type; +ahead -behind +closing; c car t truck",
         "ON",
     ]
 
@@ -422,19 +492,67 @@ def render_scene_state(observation: dict[str, Any]) -> str:
             f"{compact_signed(record['closing_speed_mps'])}{absolute} {record['type'][0]}"
         )
 
-    if observation["on_screen"]:
-        lines.extend(vehicle_line(record) for record in observation["on_screen"])
+    if on_screen:
+        lines.extend(vehicle_line(record) for record in on_screen)
     else:
         lines.append("none")
     lines.append("OFF")
-    if observation["off_screen"]:
-        lines.extend(vehicle_line(record) for record in observation["off_screen"])
+    if off_screen:
+        lines.extend(vehicle_line(record) for record in off_screen)
     else:
         lines.append("none")
     lane_fields = []
     for lane in observation["lane_summaries"]:
         lane_fields.append(f"{lane['lane'][0]}{lane['ahead_count']}/{lane['behind_count']}")
-    lines.append(" ".join(lane_fields))
+    lines.append(" ".join(lane_fields) + f" X{omitted}")
+    return "\n".join(lines)
+
+
+def render_compact_state(compact: dict[str, Any]) -> str:
+    """Short numeric compact prompt that fits the L256 graph without slicing.
+
+    The old YAML rendering of ``compact_kev_state`` was 190-212 tokens and was
+    silently cut to the state budget. This rendering keeps the player and the
+    nearest three vehicles and stays well under 100 tokens. The legal options
+    live in the question branch, so repeating them in the state is redundant.
+    """
+    player = compact["player"]
+
+    def signed(value: Any, digits: int = 0) -> str:
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return "-"
+        # Preserve the sign of a small nonzero gap; "-0" is a sign error.
+        if abs(float(value)) < 1.0:
+            return f"{float(value):+.1f}"
+        return f"{float(value):+.{digits}f}"
+
+    lines = [
+        "c1",
+        "P %s %s %d %d"
+        % (
+            player.get("lane"),
+            player.get("target_lane"),
+            round(float(player.get("speed") or 0.0)),
+            int(bool(player.get("lane_change_in_progress"))),
+        ),
+    ]
+    traffic = compact.get("traffic") or []
+    if not traffic:
+        lines.append("V none")
+    else:
+        for vehicle in traffic:
+            ttc = vehicle.get("time_to_collision")
+            ttc_text = f"{float(ttc):.1f}" if isinstance(ttc, (int, float)) and not isinstance(ttc, bool) else "-"
+            lines.append(
+                "V %s %s %s %d %s"
+                % (
+                    vehicle.get("lane"),
+                    signed(vehicle.get("relative_distance")),
+                    signed(vehicle.get("relative_speed")),
+                    int(bool(vehicle.get("in_player_lane"))),
+                    ttc_text,
+                )
+            )
     return "\n".join(lines)
 
 

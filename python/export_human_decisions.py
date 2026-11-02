@@ -19,11 +19,13 @@ from kev_state import (
     ACTION_CRITERIA,
     ACTION_CRITERIA_LANE,
     ACTION_CRITERIA_SCENE,
+    KEV_COMPACT_INSTRUCTIONS,
     KEV_LANE_INSTRUCTIONS,
     KEV_SCENE_INSTRUCTIONS,
     OBSERVATION_SCHEMA_VERSION,
     compact_kev_state,
     lane_observation,
+    render_compact_state,
     render_lane_state,
     render_scene_state,
     scene_observation,
@@ -61,7 +63,7 @@ def _kev_state(state: dict[str, Any], prompt_mode: str) -> str:
         return render_scene_state(scene_observation(state))
     if prompt_mode == "lane":
         return render_lane_state(lane_observation(state))
-    return json.dumps(compact_kev_state(state), indent=2, sort_keys=True)
+    return render_compact_state(compact_kev_state(state))
 
 
 def _criteria(prompt_mode: str) -> dict[str, str]:
@@ -77,7 +79,7 @@ def _instructions(prompt_mode: str) -> str:
         return KEV_SCENE_INSTRUCTIONS
     if prompt_mode == "lane":
         return KEV_LANE_INSTRUCTIONS
-    return "Choose the safest useful next action from the currently legal choices."
+    return KEV_COMPACT_INSTRUCTIONS
 
 
 def _split_groups(groups: list[str]) -> dict[str, str]:

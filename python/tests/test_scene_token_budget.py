@@ -5,10 +5,12 @@ from pathlib import Path
 from kev_state import (
     ACTION_CRITERIA_SCENE,
     KEV_SCENE_INSTRUCTIONS,
+    compact_kev_state,
+    render_compact_state,
     render_scene_state,
     scene_observation,
 )
-from policies.onnx_kev import SPECIAL
+from policies.onnx_kev import OnnxKevPolicy, SPECIAL
 
 LENGTH = 256
 
@@ -85,12 +87,26 @@ class SceneTokenBudgetTests(unittest.TestCase):
         branch.append(d_id)
         return len(branch)
 
-    def test_eleven_visible_and_relevant_vehicles_fit_the_graph(self):
+    def test_eleven_vehicles_are_capped_with_an_explicit_omitted_count(self):
         text = render_scene_state(scene_observation(state(9, 2)))
+        self.assertIn("X2", text)
+        lines = text.splitlines()
+        on_start = lines.index("ON")
+        off_start = lines.index("OFF")
+        on_rows = [line for line in lines[on_start + 1:off_start] if line != "none"]
+        off_rows = [line for line in lines[off_start + 1:-1] if line != "none"]
+        self.assertEqual(len(on_rows) + len(off_rows), 9)
         state_tokens = len(self.tokens(text))
         max_state = LENGTH - self.branch_length()
         self.assertLessEqual(state_tokens + 1, max_state,
                              f"{state_tokens} state tokens do not fit {max_state}")
+
+    def test_many_vehicles_fit_with_an_explicit_omitted_count(self):
+        text = render_scene_state(scene_observation(state(20, 0)))
+        self.assertIn("X11", text)
+        state_tokens = len(self.tokens(text))
+        max_state = LENGTH - self.branch_length()
+        self.assertLessEqual(state_tokens + 1, max_state)
 
     def test_seven_visible_vehicles_fit_with_absolute_speed(self):
         text = render_scene_state(scene_observation(state(7, 0)))
@@ -107,6 +123,42 @@ class SceneTokenBudgetTests(unittest.TestCase):
     def test_normal_scene_is_compact(self):
         text = render_scene_state(scene_observation(state(2, 0)))
         self.assertLess(len(self.tokens(text)), 100)
+
+    def test_compact_prompt_fits_without_slicing(self):
+        policy = OnnxKevPolicy(
+            "unused.onnx", tokenizer_path(), length=LENGTH, prompt_mode="compact"
+        )
+        policy.tok = self.tok
+        policy._encode(state(2, 0))
+        encoding = policy.last_encoding
+        self.assertFalse(encoding["state_truncated"])
+        self.assertLessEqual(encoding["total_tokens"], LENGTH)
+        self.assertTrue(encoding["state_text"].startswith("c1\nP 1 1 20 0"))
+
+    def test_compact_render_preserves_small_signs(self):
+        data = state(0, 0)
+        data["traffic"] = [{
+            "id": "rear", "lane": 1, "relative_distance_z": -0.4,
+            "relative_speed_z": -0.3, "speed": 20.3, "on_screen": True,
+            "type": "car", "length": 4.5, "width": 1.8,
+        }]
+        text = render_compact_state(compact_kev_state(data))
+        self.assertIn("-0.4", text)
+        self.assertIn("-0.3", text)
+
+    def test_scene_changes_change_the_rendered_context(self):
+        open_text = render_scene_state(scene_observation(state(0, 0)))
+        blocked = state(0, 0)
+        blocked["traffic"] = [{
+            "id": "blocker", "lane": 1, "relative_distance_z": 10.0,
+            "relative_speed_z": 6.0, "speed": 14.0, "on_screen": True,
+            "type": "truck", "length": 7.0, "width": 2.4,
+        }]
+        blocked_text = render_scene_state(scene_observation(blocked))
+        self.assertIn("ON\nnone", open_text)
+        self.assertIn("C+10 +6 14 t", blocked_text)
+        self.assertIn("C1/0", blocked_text)
+        self.assertNotEqual(open_text, blocked_text)
 
 
 if __name__ == "__main__":

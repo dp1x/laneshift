@@ -52,7 +52,7 @@ async def main() -> None:
         for state in states:
             for _ in range(args.repeat):
                 started = time.perf_counter()
-                decision = await policy.choose_action(state)
+                decision = policy.choose_action(state)
                 encoding = decision.response_payload["encoding"]
                 rows.append({
                     "mode": mode,

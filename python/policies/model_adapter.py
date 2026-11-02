@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from kev_state import ACTION_CRITERIA, compact_kev_state
+from kev_state import ACTION_CRITERIA, KEV_COMPACT_INSTRUCTIONS, compact_kev_state, render_compact_state
 from policy import PolicyDecision
 
 ACTION_CRITERIA = {
@@ -91,17 +91,12 @@ class KevSystemOnePolicy:
         compact = compact_kev_state(state)
         legal_actions = compact["legal_actions"]
         return {
-            "state": compact,
+            "state": render_compact_state(compact),
             "model": model_alias,
             "questions": {
                 "next_action": {
                     "type": "choice",
-                    "instructions": (
-                        "Choose the safest useful next action from the currently legal choices. "
-                        "A decision may take about 1.2 seconds to apply. Brake early if a vehicle "
-                        "in the player's lane is closing and time_to_collision is small. "
-                        "Only select an option present in criteria."
-                    ),
+                    "instructions": KEV_COMPACT_INSTRUCTIONS,
                     "criteria": {action: ACTION_CRITERIA[action] for action in legal_actions},
                 }
             },
@@ -142,7 +137,7 @@ class KevSystemOnePolicy:
             ) from exc
         completed_unix_ms = time.time() * 1000.0
         client_latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
-        legal_actions = request_payload["state"]["legal_actions"]
+        legal_actions = list(state.get("legal_actions") or [])
         if not isinstance(body, dict) or body.get("model") != self.model_alias:
             raise self._response_error("Kev response is missing the requested model alias", request_payload, body, started_unix_ms, completed_unix_ms, client_latency_ms, response)
         answers = body.get("answers")

@@ -41,7 +41,9 @@ Current LANESHIFT prompt:
 - rule-based safety heartbeat drives; Kev chooses `STAY` at ~0.38–0.41
 
 **Update 2026-11-01:** the prompt research below predates observation schema
-2. The current scene prompt sends every rendered vehicle, a separate relevant
+2. The current scene prompt sends up to nine safety-relevant vehicles with an
+   explicit `X<n>` omitted count (the structured observation retains every
+   vehicle), a separate relevant
 off-screen list, signed closing speeds, absolute speeds and player manoeuvre
 state, and no longer truncates at the graph limit. See
 [`OBSERVATION-AUDIT.md`](OBSERVATION-AUDIT.md). The model-quality conclusions

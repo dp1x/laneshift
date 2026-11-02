@@ -188,7 +188,7 @@ class DatasetPreparationTests(unittest.TestCase):
         self.assertNotIn("outcome", training["state"])
 
     def test_training_state_is_the_same_projection_the_model_sees(self):
-        from kev_state import compact_kev_state
+        from kev_state import compact_kev_state, render_compact_state
         from policies.model_adapter import KevSystemOnePolicy
 
         game_state = state(10)
@@ -204,9 +204,9 @@ class DatasetPreparationTests(unittest.TestCase):
         training_state = make_kev_training_record(candidate)["state"]
         request_state = KevSystemOnePolicy.build_request(game_state, "kev-latest")["state"]
         self.assertEqual(training_state, request_state)
-        self.assertEqual(training_state, compact_kev_state(game_state))
+        self.assertEqual(training_state, render_compact_state(compact_kev_state(game_state)))
         # absolute world coordinates are not part of the decision
-        self.assertNotIn("position", training_state["player"])
+        self.assertNotIn("position", training_state)
 
     def test_kev_training_requires_explicit_approval_and_source_selection(self):
         candidate = {

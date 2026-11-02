@@ -10,7 +10,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from kev_state import ACTION_CRITERIA, compact_kev_state
+from kev_state import ACTION_CRITERIA, KEV_COMPACT_INSTRUCTIONS, compact_kev_state, render_compact_state
 
 ALLOWED_ACTIONS = {"LEFT", "STAY", "RIGHT", "BRAKE"}
 STATE_FEATURES = (
@@ -31,6 +31,7 @@ SOURCE_ALIASES = {
     "human": "human",
     "rule": "rule_based",
     "rule_based": "rule_based",
+    "safe_teacher": "safe_teacher",
     "external": "external_ai",
     "external_ai": "external_ai",
     "original_model": "original_model",
@@ -39,7 +40,7 @@ SOURCE_ALIASES = {
     "dummy": "synthetic",
     "controller_fallback": "controller_fallback",
 }
-TRAINABLE_SOURCES = {"human", "rule_based", "original_model", "fine_tuned_model", "synthetic"}
+TRAINABLE_SOURCES = {"human", "rule_based", "safe_teacher", "original_model", "fine_tuned_model", "synthetic"}
 KEV_INPUT_FIELDS = ("sim_time", "player", "traffic", "legal_actions", "score", "distance", "survival_time")
 KEV_ACTION_CRITERIA = ACTION_CRITERIA
 REQUIRED_EPISODE_FIELDS = {
@@ -302,13 +303,13 @@ def make_kev_training_record(candidate):
     ):
         raise ValueError("candidate label must be one of its unique, valid legal_actions")
     # The training state is the same projection the model sees at inference time.
-    training_state = compact_kev_state(state)
+    training_state = render_compact_state(compact_kev_state(state))
     return {
         "state": training_state,
         "questions": {
             "next_action": {
                 "type": "choice",
-                "instructions": "Choose the safest useful action. Only choose a currently legal option.",
+                "instructions": KEV_COMPACT_INSTRUCTIONS,
                 "criteria": {choice: KEV_ACTION_CRITERIA[choice] for choice in legal_actions},
                 "label": action,
             }
