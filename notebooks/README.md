@@ -15,3 +15,17 @@ measured CPU reference rows.
 The fixture was generated from accepted `original_model` decisions in the
 current recordings, rendered with the production scene prompt after the
 L256 cap fix. Every request fits the graph budget; the maximum is 225 tokens.
+
+## Kev fine-tuning notebook
+
+`kev_finetune_colab.ipynb` is the controlled LoRA runbook. It loads
+`jaredpalmer/kev-0.8b@v1.0` through `--init_from`, uses the pinned Qwen base
+revision, writes the run to Google Drive, and evaluates with `kev.benchmark`.
+It takes a Kev-format `train.jsonl` / `validation.jsonl`; the canonical
+`datasets/pilot-v1/` dataset is the 1,348-row decision dataset and must be
+exported to that schema first.
+
+The notebook does not train the bare Qwen base, start a persistent API, or
+commit model weights. Fine-tuned ONNX artifacts stay on Drive/Hugging Face and
+are exported with a **new** external-data blob; see `tools/kev-onnx-export/`
+and `docs/MODELS.md`.
