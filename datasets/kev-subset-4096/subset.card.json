@@ -1,0 +1,41 @@
+{
+  "actions": {
+    "BRAKE": 552,
+    "LEFT": 55,
+    "RIGHT": 50,
+    "STAY": 3439
+  },
+  "cells": {
+    "A": 384,
+    "B": 640,
+    "C": 704,
+    "D": 288,
+    "E": 1152,
+    "F": 928
+  },
+  "densities": {
+    "0.7": 384,
+    "1.0": 640,
+    "1.5": 992,
+    "2.5": 1152,
+    "3.5": 928
+  },
+  "episodes": 124,
+  "excluded": {
+    "crash_episodes": true,
+    "duplicate_prompt_hashes": true,
+    "human_rows": true
+  },
+  "per_seed_target": 32,
+  "rows": 4096,
+  "seeds": 124,
+  "source": "C:\\Users\\Dhane\\dev\\cris@ds\\LANESHIFT\\cris@ds\\.portable-dev\\kev-v2-scene",
+  "sources": {
+    "safe_teacher": 4096
+  },
+  "test_split_touched": false,
+  "tokens": {
+    "max": 256,
+    "min": 165
+  }
+}

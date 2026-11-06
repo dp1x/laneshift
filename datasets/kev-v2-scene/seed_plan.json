@@ -1,0 +1,1772 @@
+{
+  "description": "kev-v2-scene seed-disjoint plan: 128 train + 32 validation + 32 test scenarios, plus 2 human train seeds",
+  "human_label_source": "human",
+  "prompt_length": 256,
+  "prompt_mode": "scene",
+  "safe_teacher_observation_schema": 2,
+  "seeds": [
+    {
+      "cell": "A",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900001,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 0.7
+    },
+    {
+      "cell": "A",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900002,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 0.7
+    },
+    {
+      "cell": "A",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900003,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 0.7
+    },
+    {
+      "cell": "A",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900004,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 0.7
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900005,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900006,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900007,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900008,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900009,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900010,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900011,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900012,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900013,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900014,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900015,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900016,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900017,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900018,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900019,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900020,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900021,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900022,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900023,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900024,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900025,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900026,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "D",
+      "duration_s": 90,
+      "recorded": false,
+      "seed": 900027,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "D",
+      "duration_s": 90,
+      "recorded": false,
+      "seed": 900028,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "D",
+      "duration_s": 90,
+      "recorded": false,
+      "seed": 900029,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "D",
+      "duration_s": 90,
+      "recorded": false,
+      "seed": 900030,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "D",
+      "duration_s": 90,
+      "recorded": false,
+      "seed": 900031,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "D",
+      "duration_s": 90,
+      "recorded": false,
+      "seed": 900032,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900033,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900034,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900035,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900036,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900037,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900038,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900039,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900040,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900041,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900042,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900043,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900044,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900045,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900046,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900047,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900048,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900049,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900050,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900051,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900052,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900053,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900054,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900055,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900056,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900057,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900058,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900059,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900060,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900061,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900062,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900063,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900064,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900065,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900066,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900067,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900068,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900069,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900070,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900071,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900072,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900073,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900074,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900075,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900076,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900077,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900078,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900079,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900080,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900081,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900082,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900083,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900084,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900085,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900086,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900087,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": true,
+      "seed": 900088,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "A",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900089,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 0.7
+    },
+    {
+      "cell": "A",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900090,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 0.7
+    },
+    {
+      "cell": "A",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900091,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 0.7
+    },
+    {
+      "cell": "A",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900092,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 0.7
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900093,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900094,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900095,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900096,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900097,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900098,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900099,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900100,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900101,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900102,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900103,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900104,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "D",
+      "duration_s": 90,
+      "recorded": false,
+      "seed": 900105,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "D",
+      "duration_s": 90,
+      "recorded": false,
+      "seed": 900106,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "D",
+      "duration_s": 90,
+      "recorded": false,
+      "seed": 900107,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "D",
+      "duration_s": 90,
+      "recorded": false,
+      "seed": 900108,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900109,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900110,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900111,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900112,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900113,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900114,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900115,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900116,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900117,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900118,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900119,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900120,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900121,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900122,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900123,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900124,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900125,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900126,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900127,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 900128,
+      "source": "safe_teacher",
+      "split": "train",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "A",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910001,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 0.7
+    },
+    {
+      "cell": "A",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910002,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 0.7
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910003,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910004,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910005,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910006,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910007,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910008,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910009,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910010,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910011,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910012,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910013,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910014,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910015,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910016,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "D",
+      "duration_s": 90,
+      "recorded": false,
+      "seed": 910017,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "D",
+      "duration_s": 90,
+      "recorded": false,
+      "seed": 910018,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "D",
+      "duration_s": 90,
+      "recorded": false,
+      "seed": 910019,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "D",
+      "duration_s": 90,
+      "recorded": false,
+      "seed": 910020,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910021,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910022,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910023,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910024,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910025,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910026,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910027,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910028,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910029,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910030,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910031,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 910032,
+      "source": "safe_teacher",
+      "split": "validation",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "A",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920001,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 0.7
+    },
+    {
+      "cell": "A",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920002,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 0.7
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920003,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920004,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920005,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "B",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920006,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 1.0
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920007,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920008,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920009,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920010,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920011,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920012,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920013,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920014,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920015,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "C",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920016,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "D",
+      "duration_s": 90,
+      "recorded": false,
+      "seed": 920017,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "D",
+      "duration_s": 90,
+      "recorded": false,
+      "seed": 920018,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "D",
+      "duration_s": 90,
+      "recorded": false,
+      "seed": 920019,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "D",
+      "duration_s": 90,
+      "recorded": false,
+      "seed": 920020,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 1.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920021,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920022,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920023,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920024,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920025,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "E",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920026,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 2.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920027,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920028,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920029,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920030,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920031,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "F",
+      "duration_s": 60,
+      "recorded": false,
+      "seed": 920032,
+      "source": "safe_teacher",
+      "split": "test",
+      "traffic_density": 3.5
+    },
+    {
+      "cell": "H",
+      "duration_s": null,
+      "recorded": true,
+      "seed": 644099890,
+      "source": "human",
+      "split": "train",
+      "traffic_density": 0.7
+    },
+    {
+      "cell": "H",
+      "duration_s": null,
+      "recorded": true,
+      "seed": 1501968680,
+      "source": "human",
+      "split": "train",
+      "traffic_density": 0.7
+    },
+    {
+      "cell": "H",
+      "duration_s": null,
+      "recorded": true,
+      "seed": 4135897261,
+      "source": "human",
+      "split": "train",
+      "traffic_density": 0.7
+    }
+  ],
+  "stride": {
+    "accepted_decisions": 2,
+    "approx_sim_seconds": 0.466,
+    "note": "accepted teacher decisions arrive every ~0.233 s sim; every second decision is ~0.466 s"
+  },
+  "teacher_label_source": "safe_teacher",
+  "teacher_policy": "safe_teacher",
+  "version": 1
+}

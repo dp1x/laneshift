@@ -1,0 +1,202 @@
+{
+  "accepted": 60,
+  "excluded": 1,
+  "included": 59,
+  "sessions": [
+    "session_20261103_192529_340"
+  ],
+  "source": "human",
+  "unsafe": [
+    {
+      "action": "LEFT",
+      "cell": "H",
+      "class_index": 0,
+      "criteria_keys": [
+        "LEFT",
+        "STAY",
+        "BRAKE"
+      ],
+      "decision_seq": 2,
+      "duration_s": null,
+      "episode_collisions": 1,
+      "episode_distance": 89.2666666666669,
+      "episode_id": "session_20261103_192529_340:ep_644099890_1",
+      "episode_score": 26.76,
+      "episode_survival_s": 3.56666666666666,
+      "episode_termination": "crash",
+      "example_id": "human:session_20261103_192529_340:ep_644099890_1:2",
+      "excluded_reason": "target_lane_front_gap_2.87m",
+      "game_episode_id": "ep_644099890_1",
+      "generator_version": "kev-v2-scene-builder@1",
+      "included": false,
+      "label_quality": "unsafe",
+      "label_source": "human",
+      "legal_actions": [
+        "LEFT",
+        "STAY",
+        "BRAKE"
+      ],
+      "observation_schema": 2,
+      "physics_tick": 204,
+      "policy_id": "human-keyboard@1",
+      "policy_version": "1",
+      "prompt_length": 256,
+      "prompt_mode": "scene",
+      "prompt_sha256": "b075d1e50f702ab17a656c0ba582256cb77565e23ac9dce2aa1933665f4ed31a",
+      "row_id": "e131ca469b3a87fdd73f28cb7e022bd2745621883843c69f20a9057157999d8a",
+      "scenario_seed": 644099890,
+      "session_id": "session_20261103_192529_340",
+      "sim_time": 3.39999999999999,
+      "split": "train",
+      "state_before": {
+        "collision": false,
+        "collision_count": 0,
+        "control_source": "human",
+        "distance": 84.6000000000002,
+        "episode_id": "ep_644099890_1",
+        "episode_status": "running",
+        "legal_actions": [
+          "LEFT",
+          "STAY",
+          "BRAKE"
+        ],
+        "observation_schema": 2,
+        "physics_tick": 204,
+        "player": {
+          "acceleration": 0.0,
+          "base_speed": 20.0,
+          "braking": false,
+          "current_action": "STAY",
+          "lane": 2,
+          "lane_change_cooldown": 0.0,
+          "lane_change_in_progress": false,
+          "max_speed": 28.0,
+          "position": {
+            "x": -4.0,
+            "y": 0.0,
+            "z": 84.6000000000002
+          },
+          "previous_action": "RIGHT",
+          "recent_actions": [
+            "RIGHT"
+          ],
+          "speed": 28.0,
+          "target_lane": 2,
+          "velocity": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 28.0
+          }
+        },
+        "protocol_version": 1,
+        "scenario_seed": 644099890,
+        "score": 25.46,
+        "sim_time": 3.39999999999999,
+        "state_id": "ep_644099890_1:204",
+        "survival_time": 3.39999999999999,
+        "traffic": [
+          {
+            "absolute_speed": 18.9708137512207,
+            "acceleration": 0.0,
+            "ahead": true,
+            "id": "veh_0",
+            "lane": 2,
+            "length": 4.5,
+            "on_screen": true,
+            "position": {
+              "x": -4.0,
+              "y": 0.0,
+              "z": 98.4939432144165
+            },
+            "relative_distance_z": 13.8939432144163,
+            "relative_speed_z": 9.0291862487793,
+            "speed": 18.9708137512207,
+            "type": "car",
+            "velocity": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 18.9708137512207
+            },
+            "width": 1.8
+          },
+          {
+            "absolute_speed": 19.2811756134033,
+            "acceleration": 0.0,
+            "ahead": true,
+            "id": "veh_1",
+            "lane": 0,
+            "length": 7.0,
+            "on_screen": true,
+            "position": {
+              "x": 4.0,
+              "y": 0.0,
+              "z": 112.428479862214
+            },
+            "relative_distance_z": 27.8284798622133,
+            "relative_speed_z": 8.71882438659668,
+            "speed": 19.2811756134033,
+            "type": "truck",
+            "velocity": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 19.2811756134033
+            },
+            "width": 2.4
+          },
+          {
+            "absolute_speed": 13.4328889846802,
+            "acceleration": 0.0,
+            "ahead": true,
+            "id": "veh_2",
+            "lane": 1,
+            "length": 7.0,
+            "on_screen": true,
+            "position": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 87.4655039310455
+            },
+            "relative_distance_z": 2.8655039310453,
+            "relative_speed_z": 14.5671110153198,
+            "speed": 13.4328889846802,
+            "type": "truck",
+            "velocity": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 13.4328889846802
+            },
+            "width": 2.4
+          },
+          {
+            "absolute_speed": 17.0685939788818,
+            "acceleration": 0.0,
+            "ahead": true,
+            "id": "veh_3",
+            "lane": 2,
+            "length": 4.5,
+            "on_screen": true,
+            "position": {
+              "x": -4.0,
+              "y": 0.0,
+              "z": 150.520975044796
+            },
+            "relative_distance_z": 65.920975044796,
+            "relative_speed_z": 10.9314060211182,
+            "speed": 17.0685939788818,
+            "type": "car",
+            "velocity": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 17.0685939788818
+            },
+            "width": 1.8
+          }
+        ]
+      },
+      "state_sha256": "fb1b34082d1162ffde5d574d6c8fabd12f1521d4a26a8f7104f50500ffa882f0",
+      "state_tokens": 112,
+      "total_tokens": 200,
+      "traffic_density": 0.7
+    }
+  ]
+}
