@@ -3,7 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from export_human_decisions import export
+from export_human_decisions import _criteria, _prompt_token_count, export
+from kev_state import ACTION_CRITERIA_SCENE, KEV_SCENE_INSTRUCTIONS
 
 
 def event(seed, session_suffix, action, episode, seq):
@@ -99,6 +100,33 @@ class HumanExportTests(unittest.TestCase):
             self.assertTrue(seeds["train"].isdisjoint(seeds["validation"]))
             self.assertTrue(seeds["train"].isdisjoint(seeds["test"]))
             self.assertTrue(seeds["validation"].isdisjoint(seeds["test"]))
+
+    def test_criteria_contains_only_legal_actions_in_state_order(self):
+        criteria = _criteria("scene", ["RIGHT", "STAY", "BRAKE"])
+        self.assertEqual(list(criteria), ["RIGHT", "STAY", "BRAKE"])
+        self.assertNotIn("LEFT", criteria)
+        self.assertEqual(criteria, {
+            name: ACTION_CRITERIA_SCENE[name] for name in ("RIGHT", "STAY", "BRAKE")
+        })
+
+    def test_prompt_token_gate_matches_inference_branch_construction(self):
+        tokenizer_path = Path(__file__).resolve().parents[2] / "models" / "kev-original" / "tokenizer.json"
+        if not tokenizer_path.exists():
+            self.skipTest(f"tokenizer not present: {tokenizer_path}")
+        from tokenizers import Tokenizer
+
+        tokenizer = Tokenizer.from_file(str(tokenizer_path))
+        legal = ["LEFT", "STAY", "RIGHT", "BRAKE"]
+        state_text = "v2\nP 1 1 20.0 0.0 0 0 100 0.0 0.0 STAY"
+        total, state_tokens, branch_tokens = _prompt_token_count(
+            tokenizer, state_text, legal, KEV_SCENE_INSTRUCTIONS, ACTION_CRITERIA_SCENE, 256
+        )
+        self.assertEqual(total, state_tokens + branch_tokens)
+        self.assertLessEqual(total, 256)
+        with self.assertRaises(ValueError):
+            _prompt_token_count(
+                tokenizer, "x " * 2000, legal, KEV_SCENE_INSTRUCTIONS, ACTION_CRITERIA_SCENE, 256
+            )
 
 
 if __name__ == "__main__":

@@ -47,3 +47,7 @@ experiments/20261102-teacher-fresh-v2/
 !datasets/pilot-v1/*.metrics.json
 !experiments/20261102-teacher-fresh-v3/comparison.csv
 !experiments/20261102-teacher-fresh-v3/*.metrics.json
+
+# Reproducible research release files
+!research/**/*.metrics.json
+!research/**/*.csv

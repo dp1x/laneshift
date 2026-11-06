@@ -44,6 +44,8 @@ def build_policy_spec(name, model_registry, onnx_config=None):
             "threads": int(config.get("threads", 0)),
             "model_id": str(config.get("model_id", "") or ""),
             "timeout": float(config.get("timeout", 10.0)),
+            "data_path": str(config.get("data_path", "") or ""),
+            "prompt_mode": str(config.get("prompt_mode", "scene") or "scene"),
         }
     config = (model_registry or {}).get(name)
     if not isinstance(config, dict):
@@ -228,7 +230,9 @@ def run_experiments(godot, project, policies, seeds, episodes_per_seed, duration
             server_command += [
                 "--onnx-model", spec["model_path"],
                 "--onnx-tokenizer", spec["tokenizer_path"],
+                "--onnx-data", spec["data_path"],
                 "--onnx-length", str(spec["length"]),
+                "--kev-prompt", spec["prompt_mode"],
                 "--onnx-threads", str(spec["threads"]),
                 "--onnx-model-id", spec["model_id"],
                 "--onnx-label-source", spec["label_source"],
@@ -340,6 +344,8 @@ def parse_args(argv=None):
     parser.add_argument("--controller-timeout", type=float, default=60.0)
     parser.add_argument("--onnx-model", default="")
     parser.add_argument("--onnx-tokenizer", default="")
+    parser.add_argument("--onnx-data", default="")
+    parser.add_argument("--onnx-prompt-mode", choices=("compact", "lane", "scene"), default="scene")
     parser.add_argument("--onnx-length", type=int, default=256)
     parser.add_argument("--onnx-threads", type=int, default=0)
     parser.add_argument("--onnx-model-id", default="")
@@ -372,6 +378,8 @@ def main(argv=None):
     onnx_config = {
         "model_path": args.onnx_model,
         "tokenizer_path": args.onnx_tokenizer,
+        "data_path": args.onnx_data,
+        "prompt_mode": args.onnx_prompt_mode,
         "length": args.onnx_length,
         "threads": args.onnx_threads,
         "model_id": args.onnx_model_id,

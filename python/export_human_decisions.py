@@ -66,12 +66,51 @@ def _kev_state(state: dict[str, Any], prompt_mode: str) -> str:
     return render_compact_state(compact_kev_state(state))
 
 
-def _criteria(prompt_mode: str) -> dict[str, str]:
+def _criteria(prompt_mode: str, legal_actions: list[str]) -> dict[str, str]:
+    """Criteria for exactly the actions the model is offered at inference."""
     if prompt_mode == "scene":
-        return ACTION_CRITERIA_SCENE
-    if prompt_mode == "lane":
-        return ACTION_CRITERIA_LANE
-    return ACTION_CRITERIA
+        base = ACTION_CRITERIA_SCENE
+    elif prompt_mode == "lane":
+        base = ACTION_CRITERIA_LANE
+    else:
+        base = ACTION_CRITERIA
+    return {name: base[name] for name in legal_actions if name in base}
+
+
+def _prompt_token_count(
+    tokenizer: Any,
+    state_text: str,
+    legal_actions: list[str],
+    instructions: str,
+    criteria: dict[str, str],
+    prompt_length: int,
+) -> tuple[int, int, int]:
+    """Mirror OnnxKevPolicy._encode: (total, state+delimiter, branch) tokens.
+
+    The inference encoder is the authority. Keeping the same delimiter and
+    span construction here makes an exporter gate match the L256 graph exactly.
+    """
+    from policies.onnx_kev import SPECIAL, _user_tokens
+
+    q_id = tokenizer.token_to_id(SPECIAL[1])
+    o_id = tokenizer.token_to_id(SPECIAL[2])
+    c_id = tokenizer.token_to_id(SPECIAL[3])
+    d_id = tokenizer.token_to_id(SPECIAL[4])
+    instr = [q_id] + _user_tokens(tokenizer, instructions)
+    spans = [
+        [o_id] + _user_tokens(tokenizer, f"{action}: {criteria[action]}") + [c_id]
+        for action in legal_actions
+    ]
+    branch = instr + [token for span in spans for token in span] + [d_id]
+    state_tokens = _user_tokens(tokenizer, state_text)
+    state_with_delimiter = 1 + len(state_tokens)
+    total = state_with_delimiter + len(branch)
+    if total > prompt_length:
+        raise ValueError(
+            f"{prompt_length}-token prompt budget exceeded: {total} tokens "
+            f"({state_with_delimiter} state, {len(branch)} branch)"
+        )
+    return total, state_with_delimiter, len(branch)
 
 
 def _instructions(prompt_mode: str) -> str:
@@ -106,14 +145,29 @@ def _split_groups(groups: list[str]) -> dict[str, str]:
     return split
 
 
-def export(recordings: Path, output: Path, prompt_mode: str, session_filter: set[str] | None, allow_legacy: bool = False) -> dict[str, Any]:
+def export(
+    recordings: Path,
+    output: Path,
+    prompt_mode: str,
+    session_filter: set[str] | None,
+    allow_legacy: bool = False,
+    tokenizer_path: Path | None = None,
+    prompt_length: int = 256,
+) -> dict[str, Any]:
     output.mkdir(parents=True, exist_ok=True)
+    tokenizer = None
+    if tokenizer_path is not None:
+        from tokenizers import Tokenizer
+
+        tokenizer = Tokenizer.from_file(str(tokenizer_path))
     raw: list[dict[str, Any]] = []
     cards: list[dict[str, Any]] = []
     nonhuman = Counter()
     malformed = 0
     duplicates = 0
     illegal = 0
+    prompt_over_budget = 0
+    prompt_token_counts: list[int] = []
     legacy_schema = 0
     schema_versions = Counter()
     sessions = 0
@@ -165,10 +219,13 @@ def export(recordings: Path, output: Path, prompt_mode: str, session_filter: set
             if event_id:
                 seen_event_ids.add(event_id)
             seen_decisions.add(decision_key)
-            legal = state.get("legal_actions", [])
+            legal = [name for name in state.get("legal_actions", []) if isinstance(name, str)]
             is_legal = action in legal
             if not is_legal:
                 illegal += 1
+            legal_criteria = _criteria(prompt_mode, legal)
+            instructions = _instructions(prompt_mode)
+            state_text = _kev_state(state, prompt_mode)
             human_adjudicated = event.get("human_adjudicated_action")
             schema_version = int(state.get("observation_schema", 1) or 1)
             schema_versions[str(schema_version)] += 1
@@ -218,6 +275,31 @@ def export(recordings: Path, output: Path, prompt_mode: str, session_filter: set
                 "schema_version": schema_version,
             }
             raw.append(raw_record)
+            if not is_legal:
+                raw_record["training_eligible"] = False
+                raw_record["exclusion_reason"] = "illegal_action"
+                continue
+            if tokenizer is not None:
+                if not legal_criteria:
+                    malformed += 1
+                    raw_record["training_eligible"] = False
+                    raw_record["exclusion_reason"] = "no_legal_actions"
+                    continue
+                try:
+                    total_tokens, state_tokens, branch_tokens = _prompt_token_count(
+                        tokenizer, state_text, legal, instructions, legal_criteria, prompt_length
+                    )
+                except ValueError as exc:
+                    prompt_over_budget += 1
+                    raw_record["training_eligible"] = False
+                    raw_record["exclusion_reason"] = "prompt_over_budget"
+                    raw_record["prompt_error"] = str(exc)
+                    continue
+                raw_record["prompt_tokens"] = total_tokens
+                raw_record["state_tokens"] = state_tokens
+                raw_record["branch_tokens"] = branch_tokens
+                raw_record["training_eligible"] = True
+                prompt_token_counts.append(total_tokens)
             group_key = f"seed:{seed}"
             group_names[group_key] = group_key
             group_rows[group_key].append(raw_record)
@@ -229,13 +311,14 @@ def export(recordings: Path, output: Path, prompt_mode: str, session_filter: set
         split = split_map.get(group_key, "train")
         for row in rows:
             state = row["state_before"]
+            legal_actions = [name for name in state.get("legal_actions", []) if isinstance(name, str)]
             example = {
                 "state": _kev_state(state, prompt_mode),
                 "questions": {
                     "next_action": {
                         "type": "choice",
                         "instructions": _instructions(prompt_mode),
-                        "criteria": _criteria(prompt_mode),
+                        "criteria": _criteria(prompt_mode, legal_actions),
                         "label": row["human_action"],
                     }
                 },
@@ -251,8 +334,12 @@ def export(recordings: Path, output: Path, prompt_mode: str, session_filter: set
                 "human_adjudicated_action": row["human_adjudicated_action"],
                 "label_source": "human",
                 "legal_action": row["legal_action"],
+                "legal_actions": legal_actions,
                 "episode_outcome": row["episode_outcome"],
                 "prompt_mode": prompt_mode,
+                "prompt_tokens": row.get("prompt_tokens"),
+                "state_tokens": row.get("state_tokens"),
+                "branch_tokens": row.get("branch_tokens"),
                 "observation_schema": OBSERVATION_SCHEMA_VERSION,
             })
 
@@ -285,6 +372,13 @@ def export(recordings: Path, output: Path, prompt_mode: str, session_filter: set
         "malformed": malformed,
         "duplicates": duplicates,
         "illegal_human_actions": illegal,
+        "prompt_length": prompt_length,
+        "prompt_over_budget": prompt_over_budget,
+        "prompt_tokens": {
+            "min": min(prompt_token_counts) if prompt_token_counts else None,
+            "max": max(prompt_token_counts) if prompt_token_counts else None,
+            "rows": len(prompt_token_counts),
+        },
         "schema_versions": dict(schema_versions),
         "legacy_schema_excluded": legacy_schema,
         "splits": split_counts,
@@ -310,6 +404,8 @@ def export(recordings: Path, output: Path, prompt_mode: str, session_filter: set
         f"- malformed: {malformed}",
         f"- duplicates: {duplicates}",
         f"- illegal human actions: {illegal}",
+        f"- prompt budget: {prompt_length} tokens; over-budget rows: {prompt_over_budget}",
+        f"- prompt tokens: {card['prompt_tokens']}",
         f"- observation schema required for training: {OBSERVATION_SCHEMA_VERSION}",
         f"- schema versions: {dict(schema_versions)}",
         f"- legacy schema excluded from training: {legacy_schema}",
@@ -329,11 +425,29 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=Path("human-data"))
     parser.add_argument("--session", action="append", default=[])
     parser.add_argument("--prompt-mode", choices=("compact", "lane", "scene"), default="scene")
+    parser.add_argument(
+        "--tokenizer",
+        type=Path,
+        default=Path(__file__).resolve().parents[1] / "models" / "kev-original" / "tokenizer.json",
+        help="tokenizer.json used by the inference graph; required for the exact L256 prompt gate",
+    )
+    parser.add_argument("--prompt-length", type=int, default=256)
     parser.add_argument("--allow-legacy", action="store_true",
                         help="include schema-v1 states in training rows; not recommended")
     args = parser.parse_args()
     session_filter = set(args.session) if args.session else None
-    card = export(args.recordings, args.output, args.prompt_mode, session_filter, args.allow_legacy)
+    tokenizer_path = args.tokenizer if args.tokenizer and args.tokenizer.exists() else None
+    if tokenizer_path is None:
+        print("WARNING: tokenizer not found; prompt token budget is not enforced", flush=True)
+    card = export(
+        args.recordings,
+        args.output,
+        args.prompt_mode,
+        session_filter,
+        args.allow_legacy,
+        tokenizer_path,
+        args.prompt_length,
+    )
     print(json.dumps(card, indent=2, sort_keys=True))
 
 
