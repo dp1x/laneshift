@@ -6,6 +6,10 @@ LANESHIFT is an early-stage research prototype. It provides a small driving envi
 
 The project is intended to support experiments in fine-tuning compact decision models. The game exports structured telemetry, records discrete events, and exposes a programmatic control interface so the same scenarios can be tested across different controllers.
 
+## Project Guide
+
+For the full research write-up — research question, game environment, data pipeline, LoRA fine-tune, ONNX export, offline and gameplay results, limitations, sources, and reproduction steps — see [`PROJECT-GUIDE.md`](PROJECT-GUIDE.md).
+
 ## Current status
 
 What works today:
