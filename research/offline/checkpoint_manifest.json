@@ -1,0 +1,10 @@
+{
+  "dtype": "bf16",
+  "fine_tuned_dtype": "fp32",
+  "fine_tuned_sha256": "142e198a66fde6204d85bcd42be9f8170cbcf4741fcc5a739184b42004a90ba8",
+  "original_sha256": "9b908623acb162118575f4e7a94524f9c139c335be4bfb74d6cfceca01e1885a",
+  "run": "/workspace/runs/laneshift-kev-subset-e1",
+  "temperature": 1.0,
+  "test_rows": 4317,
+  "test_sha256": "d16f65ab244b587ad0b7a56e702eb426543dedd4f7c5e4548af9d7bf58471da4"
+}

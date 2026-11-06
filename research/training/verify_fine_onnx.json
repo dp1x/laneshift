@@ -1,0 +1,37 @@
+{
+  "onnx": {
+    "fine_tuned": {
+      "logits": [
+        0.37824729084968567,
+        0.4216260612010956
+      ],
+      "probs": [
+        0.4891570076463938,
+        0.5108429923536062
+      ]
+    },
+    "original": {
+      "logits": [
+        0.26404663920402527,
+        0.21332022547721863
+      ],
+      "probs": [
+        0.5126788848054605,
+        0.48732111519453947
+      ]
+    }
+  },
+  "real_tokens": 35,
+  "sha256": {
+    "fine_adapter": "142e198a66fde6204d85bcd42be9f8170cbcf4741fcc5a739184b42004a90ba8",
+    "fine_data": "bccebbaab31de577b9d831ec24026d195a9b93fc63124f747f4921a62a0d3940",
+    "fine_head": "7ed5d33839f8e1aedc3322a5c186fcd4c4d3dbba7ac30d992828d9e8cff6bc38",
+    "fine_onnx": "b952923cf621d1b3b57d058ea6888b5530c23d0c471b0fe6ccced26085e13a28",
+    "original_data": "3b03a84c1c2c6b1d3a99dd469ab12f0ebb48b22680d594a4b3838253ea54e07e",
+    "original_onnx": "031a03bd0d162bbbd48bf554bbd1878f29f870dfc3c28c69f5362f3eb5cc3129"
+  },
+  "torch_fine_logits": [
+    0.40521928668022156,
+    0.47468891739845276
+  ]
+}

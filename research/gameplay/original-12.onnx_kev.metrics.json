@@ -1,0 +1,42 @@
+{
+  "policy": "onnx_kev",
+  "policy_kind": "model",
+  "model_id": "original-kev-L256",
+  "model_alias": "kev-onnx",
+  "model_sha256": "031a03bd0d162bbbd48bf554bbd1878f29f870dfc3c28c69f5362f3eb5cc3129",
+  "evaluation_mode": false,
+  "live_mode": false,
+  "decisions": 24,
+  "decision_requests": 346,
+  "actions": {
+    "LEFT": 10,
+    "STAY": 14
+  },
+  "applied_actions": {
+    "LEFT": 9,
+    "STAY": 12
+  },
+  "rejected_actions": 3,
+  "invalid_states": 0,
+  "invalid_actions": 0,
+  "protocol_rejections": 2,
+  "controller_failures": 0,
+  "model_errors": 0,
+  "decision_timeouts": 0,
+  "inference_busy": 0,
+  "stale_notifications": 0,
+  "completed_episodes": 12,
+  "states_received": 346,
+  "states_ignored": 0,
+  "max_event_loop_lag_ms": 117.2,
+  "superseded_states": 309,
+  "stale_decisions": 11,
+  "decision_latency_ms_mean": 1170.4167457147767,
+  "decision_latency_ms_p50": 1117.0975000131875,
+  "decision_latency_ms_p95": 1561.0095000010915,
+  "decision_latency_ms_p99": 1578.0327999964356,
+  "model_latency_ms_mean": 1165.0567041663937,
+  "model_latency_ms_p50": 1106.169199978467,
+  "model_latency_ms_p95": 1506.7361000110395,
+  "ack_rtt_ms_mean": 10.595004543905485
+}

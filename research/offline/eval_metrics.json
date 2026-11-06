@@ -1,0 +1,250 @@
+{
+  "fine_tuned": {
+    "accuracy": 0.8663,
+    "actual_counts": {
+      "BRAKE": 562,
+      "LEFT": 55,
+      "RIGHT": 67,
+      "STAY": 3633
+    },
+    "brier": 0.209,
+    "calibration_bins": [
+      {
+        "accuracy": 0.463,
+        "bin": [
+          0.5,
+          0.6
+        ],
+        "confidence": 0.566,
+        "count": 108
+      },
+      {
+        "accuracy": 0.5771,
+        "bin": [
+          0.6,
+          0.7
+        ],
+        "confidence": 0.647,
+        "count": 279
+      },
+      {
+        "accuracy": 0.6025,
+        "bin": [
+          0.7,
+          0.8
+        ],
+        "confidence": 0.7419,
+        "count": 161
+      },
+      {
+        "accuracy": 0.778,
+        "bin": [
+          0.8,
+          0.9
+        ],
+        "confidence": 0.8667,
+        "count": 563
+      },
+      {
+        "accuracy": 0.9339,
+        "bin": [
+          0.9,
+          1.0
+        ],
+        "confidence": 0.9549,
+        "count": 3206
+      }
+    ],
+    "confusion_matrix": [
+      [
+        0,
+        55,
+        0,
+        0
+      ],
+      [
+        0,
+        3627,
+        0,
+        6
+      ],
+      [
+        0,
+        67,
+        0,
+        0
+      ],
+      [
+        0,
+        449,
+        0,
+        113
+      ]
+    ],
+    "ece": 0.0395,
+    "eval_seconds": 292.697,
+    "log_loss": 0.4093,
+    "macro_f1": 0.3145,
+    "mean_confidence": 0.9059,
+    "offered_brier": 0.209,
+    "offered_log_loss": 0.4093,
+    "per_class": {
+      "BRAKE": {
+        "f1": 0.3319,
+        "precision": 0.9496,
+        "recall": 0.2011,
+        "support": 562
+      },
+      "LEFT": {
+        "f1": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "support": 55
+      },
+      "RIGHT": {
+        "f1": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "support": 67
+      },
+      "STAY": {
+        "f1": 0.9263,
+        "precision": 0.864,
+        "recall": 0.9983,
+        "support": 3633
+      }
+    },
+    "predicted_counts": {
+      "BRAKE": 119,
+      "LEFT": 0,
+      "RIGHT": 0,
+      "STAY": 4198
+    },
+    "rows": 4317,
+    "temperature": 1.0
+  },
+  "original": {
+    "accuracy": 0.716,
+    "actual_counts": {
+      "BRAKE": 562,
+      "LEFT": 55,
+      "RIGHT": 67,
+      "STAY": 3633
+    },
+    "brier": 0.5417,
+    "calibration_bins": [
+      {
+        "accuracy": 0.6356,
+        "bin": [
+          0.3,
+          0.4
+        ],
+        "confidence": 0.3903,
+        "count": 483
+      },
+      {
+        "accuracy": 0.712,
+        "bin": [
+          0.4,
+          0.5
+        ],
+        "confidence": 0.4286,
+        "count": 2611
+      },
+      {
+        "accuracy": 0.8337,
+        "bin": [
+          0.5,
+          0.6
+        ],
+        "confidence": 0.5506,
+        "count": 1052
+      },
+      {
+        "accuracy": 0.7414,
+        "bin": [
+          0.6,
+          0.7
+        ],
+        "confidence": 0.6179,
+        "count": 58
+      },
+      {
+        "accuracy": 0.0442,
+        "bin": [
+          0.7,
+          0.8
+        ],
+        "confidence": 0.7372,
+        "count": 113
+      }
+    ],
+    "confusion_matrix": [
+      [
+        5,
+        50,
+        0,
+        0
+      ],
+      [
+        547,
+        3086,
+        0,
+        0
+      ],
+      [
+        8,
+        59,
+        0,
+        0
+      ],
+      [
+        65,
+        497,
+        0,
+        0
+      ]
+    ],
+    "ece": 0.2876,
+    "eval_seconds": 262.56,
+    "log_loss": 0.9268,
+    "macro_f1": 0.2143,
+    "mean_confidence": 0.4647,
+    "offered_brier": 0.5417,
+    "offered_log_loss": 0.9268,
+    "per_class": {
+      "BRAKE": {
+        "f1": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "support": 562
+      },
+      "LEFT": {
+        "f1": 0.0147,
+        "precision": 0.008,
+        "recall": 0.0909,
+        "support": 55
+      },
+      "RIGHT": {
+        "f1": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "support": 67
+      },
+      "STAY": {
+        "f1": 0.8426,
+        "precision": 0.8359,
+        "recall": 0.8494,
+        "support": 3633
+      }
+    },
+    "predicted_counts": {
+      "BRAKE": 0,
+      "LEFT": 625,
+      "RIGHT": 0,
+      "STAY": 3692
+    },
+    "rows": 4317,
+    "temperature": 1.0
+  }
+}
